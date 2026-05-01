@@ -1,0 +1,8 @@
+graph LR
+    Start[Start] --> Auth{Authenticated?}
+    Auth -->|Yes| Dashboard[Dashboard]
+    Auth -->|No| Login[Login Page]
+    Login --> Auth
+    Dashboard --> Profile(User Profile)
+    Dashboard --> Settings(Settings)
+    Dashboard --> Logout((Logout))

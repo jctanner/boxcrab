@@ -1,0 +1,6 @@
+graph TD
+    A[Input] --> B{Validate}
+    B -->|Valid| C[Process]
+    B -->|Invalid| D[Reject]
+    C --> E[Output]
+    D --> E

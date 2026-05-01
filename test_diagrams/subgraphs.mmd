@@ -1,0 +1,11 @@
+graph TD
+    subgraph Frontend
+        A[React App] --> B[API Client]
+    end
+    subgraph Backend
+        C[REST API] --> D[Service Layer]
+        D --> E[(Database)]
+    end
+    B --> C
+    A -.-> F[CDN]
+    D ==> G[Message Queue]
