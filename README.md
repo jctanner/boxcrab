@@ -1,5 +1,9 @@
 # boxcrab
 
+<p align="center">
+  <img src="assets/img/logo.png" alt="boxcrab logo" width="400">
+</p>
+
 A native diagram viewer built in Rust. Renders Mermaid and Structurizr DSL files with crisp output at any zoom level -- no browser, no webview, no Electron.
 
 ## Features

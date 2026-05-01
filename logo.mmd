@@ -1,0 +1,20 @@
+graph TD
+    LE((L)) --- HEAD{boxcrab}
+    RE((R)) --- HEAD
+    HEAD --- LC[Left Claw]
+    HEAD --- RC[Right Claw]
+    LC --- L1[leg]
+    LC --- L2[leg]
+    LC --- L3[leg]
+    RC --- R1[leg]
+    RC --- R2[leg]
+    RC --- R3[leg]
+
+    classDef head fill:#e8432a,stroke:#b8301e,color:#fff,stroke-width:3px
+    classDef eye fill:#222,stroke:#000,color:#fff,stroke-width:2px
+    classDef claw fill:#ff6b4a,stroke:#e8432a,color:#fff,stroke-width:2px
+    classDef leg fill:#d43a24,stroke:#b8301e,color:#fff,stroke-width:2px
+    class HEAD head
+    class LE,RE eye
+    class LC,RC claw
+    class L1,L2,L3,R1,R2,R3 leg
