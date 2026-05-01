@@ -50,6 +50,36 @@ boxcrab --view 1 architecture.dsl
 | `--scale <n>` | 2 | Scale factor for PNG export |
 | `--view <n>` | 0 | View index for multi-view formats (0-based) |
 
+## Examples
+
+All examples below are rendered by boxcrab from files in [`test_diagrams/`](test_diagrams/).
+
+### Mermaid: Banking System
+
+![Banking System](assets/img/examples/banking-system-mmd.png)
+
+### Mermaid: CI/CD Pipeline
+
+![CI/CD Pipeline](assets/img/examples/ci-cd-pipeline-mmd.png)
+
+### Mermaid: Microservices
+
+![Microservices](assets/img/examples/microservices-mmd.png)
+
+### Structurizr DSL: ML Platform (System Context)
+
+![ML Platform](assets/img/examples/ml-platform-dsl.png)
+
+### Structurizr DSL: E-Commerce (System Context)
+
+![E-Commerce](assets/img/examples/drilldown_test-dsl.png)
+
+### Mermaid: Subgraphs and Styles
+
+![Styled](assets/img/examples/styled-mmd.png)
+
+More examples in [`assets/img/examples/`](assets/img/examples/).
+
 ## Supported Formats
 
 ### Mermaid (.mmd)

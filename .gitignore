@@ -3,3 +3,4 @@ odh.diagrams
 references/
 *.png
 !assets/img/logo.png
+!assets/img/examples/*.png
