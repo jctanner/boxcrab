@@ -1,0 +1,40 @@
+graph LR
+    dev(Developer)
+    rm(Release Manager)
+
+    subgraph cicd [CI/CD Platform]
+        src[Source Control]
+        ci[CI Server]
+        registry[Artifact Registry]
+        scanner[Security Scanner]
+        staging[Staging Cluster]
+        prod[Production Cluster]
+        config[Config Store]
+        monitor[Monitoring]
+        gitops[GitOps Controller]
+    end
+
+    slack[Slack]
+    pager[PagerDuty]
+
+    dev -->|Git/SSH| src
+    rm -->|HTTPS| gitops
+    src -->|Webhook| ci
+    ci -->|API| scanner
+    ci -->|OCI| registry
+    ci -->|Webhook| slack
+    registry -->|Webhook| gitops
+    gitops -->|K8s API| staging
+    gitops -->|K8s API| prod
+    gitops --> config
+    staging -->|Prometheus| monitor
+    prod -->|Prometheus| monitor
+    monitor -->|Webhook| pager
+    monitor -->|Webhook| slack
+
+    classDef person fill:#4A148C,stroke:#3B1070,color:#fff,stroke-width:2px
+    classDef container fill:#CE93D8,stroke:#AB47BC,color:#000,stroke-width:2px
+    classDef external fill:#9E9E9E,stroke:#888888,color:#fff,stroke-width:2px
+    class dev,rm person
+    class src,ci,registry,scanner,staging,prod,config,monitor,gitops container
+    class slack,pager external

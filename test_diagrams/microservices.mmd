@@ -1,0 +1,53 @@
+graph LR
+    mobileUser(Mobile User)
+    webUser(Web User)
+
+    subgraph platform [Ride Sharing Platform]
+        riderApp[Rider App]
+        driverApp[Driver App]
+        webDash[Web Dashboard]
+        gateway[API Gateway]
+        rideSvc[Ride Service]
+        matchSvc[Matching Service]
+        priceSvc[Pricing Service]
+        locSvc[Location Service]
+        paySvc[Payment Service]
+        notifySvc[Notification Service]
+        rideDb[Ride DB]
+        locDb[Location Store]
+        kafka[Event Bus]
+        minio[Object Storage]
+    end
+
+    payGw[Payment Gateway]
+    maps[Map Provider]
+    sms[SMS Provider]
+
+    mobileUser --> riderApp
+    mobileUser --> driverApp
+    webUser --> webDash
+    riderApp -->|HTTPS| gateway
+    driverApp -->|HTTPS| gateway
+    webDash -->|HTTPS| gateway
+    gateway -->|gRPC| rideSvc
+    gateway -->|gRPC| locSvc
+    gateway -->|gRPC| paySvc
+    rideSvc -->|gRPC| matchSvc
+    rideSvc -->|gRPC| priceSvc
+    rideSvc -->|SQL| rideDb
+    rideSvc -->|Kafka| kafka
+    rideSvc -->|S3 API| minio
+    matchSvc --> locDb
+    locSvc --> locDb
+    locSvc -->|HTTPS| maps
+    paySvc -->|HTTPS| payGw
+    paySvc -->|SQL| rideDb
+    kafka --> notifySvc
+    notifySvc -->|HTTPS| sms
+
+    classDef person fill:#2D882D,stroke:#246B24,color:#fff,stroke-width:2px
+    classDef container fill:#77CC77,stroke:#5FB35F,color:#000,stroke-width:2px
+    classDef external fill:#888888,stroke:#777777,color:#fff,stroke-width:2px
+    class mobileUser,webUser person
+    class riderApp,driverApp,webDash,gateway,rideSvc,matchSvc,priceSvc,locSvc,paySvc,notifySvc,rideDb,locDb,kafka,minio container
+    class payGw,maps,sms external

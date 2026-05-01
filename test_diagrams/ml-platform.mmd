@@ -1,0 +1,46 @@
+graph TB
+    ds(Data Scientist)
+    mle(ML Engineer)
+
+    subgraph mlPlatform [ML Platform]
+        notebook[Notebook Server]
+        featureStore[Feature Store]
+        pipeline[Training Pipeline]
+        modelReg[Model Registry]
+        serving[Serving Layer]
+        dataLake[Data Lake]
+        metaDb[Metadata DB]
+        gpu[GPU Cluster]
+        monitoring[Monitoring]
+    end
+
+    warehouse[Data Warehouse]
+    labeling[Labeling Service]
+    cloud[Cloud Storage]
+
+    ds --> notebook
+    mle -->|HTTPS| modelReg
+    mle -->|HTTPS| monitoring
+    notebook -->|gRPC| featureStore
+    notebook -->|S3 API| dataLake
+    notebook -->|K8s API| pipeline
+    pipeline -->|K8s API| gpu
+    pipeline -->|gRPC| featureStore
+    pipeline -->|REST| modelReg
+    pipeline -->|SQL| metaDb
+    pipeline -->|S3 API| dataLake
+    pipeline -->|HTTPS| labeling
+    modelReg -->|K8s API| serving
+    serving -->|gRPC| featureStore
+    serving -->|HTTPS| monitoring
+    featureStore -->|SQL| warehouse
+    featureStore -->|S3 API| dataLake
+    monitoring -->|SQL| metaDb
+    dataLake -->|S3 API| cloud
+
+    classDef person fill:#B71C1C,stroke:#8E1515,color:#fff,stroke-width:2px
+    classDef container fill:#EF9A9A,stroke:#E57373,color:#000,stroke-width:2px
+    classDef external fill:#757575,stroke:#616161,color:#fff,stroke-width:2px
+    class ds,mle person
+    class notebook,featureStore,pipeline,modelReg,serving,dataLake,metaDb,gpu,monitoring container
+    class warehouse,labeling,cloud external

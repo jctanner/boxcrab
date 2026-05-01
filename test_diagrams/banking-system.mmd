@@ -1,0 +1,30 @@
+graph TB
+    customer(Personal Banking Customer)
+    backoffice(Back Office Staff)
+
+    subgraph bankingSystem [Internet Banking System]
+        spa[Single-Page Application]
+        mobile[Mobile App]
+        api[API Application]
+        db[Database]
+    end
+
+    mainframe[Mainframe Banking System]
+    email[E-Mail System]
+
+    customer --> spa
+    customer --> mobile
+    spa -->|JSON/HTTPS| api
+    mobile -->|JSON/HTTPS| api
+    api -->|JDBC| db
+    api -->|XML/HTTPS| mainframe
+    api -->|SMTP| email
+    email -->|Sends e-mails to| customer
+    backoffice --> mainframe
+
+    classDef person fill:#08427B,stroke:#073B6F,color:#fff,stroke-width:2px
+    classDef container fill:#438DD5,stroke:#3A7ABD,color:#fff,stroke-width:2px
+    classDef external fill:#999999,stroke:#888888,color:#fff,stroke-width:2px
+    class customer,backoffice person
+    class spa,mobile,api,db container
+    class mainframe,email external
