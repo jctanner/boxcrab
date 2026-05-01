@@ -56,27 +56,27 @@ All examples below are rendered by boxcrab from files in [`test_diagrams/`](test
 
 ### Mermaid: Banking System
 
-![Banking System](test_diagrams/banking-system-mmd.png)
+<img src="test_diagrams/banking-system-mmd.png" alt="Banking System" width="600">
 
 ### Mermaid: CI/CD Pipeline
 
-![CI/CD Pipeline](test_diagrams/ci-cd-pipeline-mmd.png)
+<img src="test_diagrams/ci-cd-pipeline-mmd.png" alt="CI/CD Pipeline" width="600">
 
 ### Mermaid: Microservices
 
-![Microservices](test_diagrams/microservices-mmd.png)
+<img src="test_diagrams/microservices-mmd.png" alt="Microservices" width="600">
 
 ### Structurizr DSL: ML Platform (System Context)
 
-![ML Platform](test_diagrams/ml-platform-dsl.png)
+<img src="test_diagrams/ml-platform-dsl.png" alt="ML Platform" width="600">
 
 ### Structurizr DSL: E-Commerce (System Context)
 
-![E-Commerce](test_diagrams/drilldown_test-dsl.png)
+<img src="test_diagrams/drilldown_test-dsl.png" alt="E-Commerce" width="600">
 
 ### Mermaid: Subgraphs and Styles
 
-![Styled](test_diagrams/styled-mmd.png)
+<img src="test_diagrams/styled-mmd.png" alt="Styled" width="600">
 
 More examples in [`test_diagrams/`](test_diagrams/).
 
