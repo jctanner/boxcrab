@@ -330,10 +330,38 @@ impl EditorState {
             (mx.max(n.x + n.width), my.max(n.y + n.height))
         });
 
+        let padding = 20.0;
+        let mut subgraphs = Vec::new();
+        for sg in &self.graph.subgraphs {
+            let mut min_x = f32::MAX;
+            let mut min_y = f32::MAX;
+            let mut max_sg_x = f32::MIN;
+            let mut max_sg_y = f32::MIN;
+            let mut found = false;
+            for n in &nodes {
+                if sg.node_ids.contains(&n.id) {
+                    found = true;
+                    min_x = min_x.min(n.x - n.width / 2.0);
+                    min_y = min_y.min(n.y - n.height / 2.0);
+                    max_sg_x = max_sg_x.max(n.x + n.width / 2.0);
+                    max_sg_y = max_sg_y.max(n.y + n.height / 2.0);
+                }
+            }
+            if found {
+                subgraphs.push(layout::LayoutSubgraph {
+                    title: sg.title.clone(),
+                    x: min_x - padding,
+                    y: min_y - padding,
+                    width: (max_sg_x - min_x) + padding * 2.0,
+                    height: (max_sg_y - min_y) + padding * 2.0,
+                });
+            }
+        }
+
         self.layout_result = Some(layout::LayoutResult {
             nodes,
             edges,
-            subgraphs: Vec::new(),
+            subgraphs,
             total_width: max_x.max(2000.0),
             total_height: max_y.max(2000.0),
         });
@@ -1633,8 +1661,9 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
     if primary_clicked {
         if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
             if viewport_rect.contains(pointer_pos) {
+                let shift_held = ui.input(|i| i.modifiers.shift);
                 let scene_pos = screen_to_scene(pointer_pos, viewport_rect, scene_rect_before);
-                handle_canvas_click(state, scene_pos);
+                handle_canvas_click(state, scene_pos, shift_held);
             }
         }
     }
@@ -1680,7 +1709,7 @@ fn screen_to_scene(
     )
 }
 
-fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2) {
+fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2, shift: bool) {
     match state.interaction.clone() {
         InteractionState::PlacingNode { shape } => {
             state.place_node(shape, scene_pos);
@@ -1703,8 +1732,16 @@ fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2) {
         }
         InteractionState::Idle | InteractionState::DraggingNode { .. } => {
             if let Some(node_id) = state.node_at_scene_pos(scene_pos) {
-                state.selected_nodes.clear();
-                state.selected_nodes.insert(node_id.clone());
+                if shift {
+                    if state.selected_nodes.contains(&node_id) {
+                        state.selected_nodes.remove(&node_id);
+                    } else {
+                        state.selected_nodes.insert(node_id.clone());
+                    }
+                } else {
+                    state.selected_nodes.clear();
+                    state.selected_nodes.insert(node_id.clone());
+                }
                 state.selected_edge = None;
                 state.interaction = InteractionState::DraggingNode { node_id };
             } else if let Some(edge_idx) = state.edge_at_scene_pos(scene_pos) {
