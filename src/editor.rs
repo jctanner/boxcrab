@@ -679,54 +679,32 @@ fn color_edit_row(ui: &mut egui::Ui, label: &str, color: &mut Option<[u8; 3]>) -
     });
 
     let mut enabled = color.is_some();
-    let mut rgb = color.unwrap_or([200, 200, 200]);
+    let mut rgba = match *color {
+        Some(rgb) => egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]),
+        None => egui::Color32::from_rgb(200, 200, 200),
+    };
 
     ui.horizontal(|ui| {
         if ui.checkbox(&mut enabled, "").changed() {
             changed = true;
             if enabled {
-                *color = Some(rgb);
+                *color = Some([rgba.r(), rgba.g(), rgba.b()]);
             } else {
                 *color = None;
             }
         }
         if enabled {
-            let preview = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
-            let (rect, _) = ui.allocate_exact_size(
-                egui::Vec2::new(16.0, 16.0),
-                egui::Sense::hover(),
-            );
-            ui.painter()
-                .rect_filled(rect, 2.0, preview);
-            ui.painter().rect_stroke(
-                rect,
-                2.0,
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 120, 120)),
-                egui::StrokeKind::Outside,
-            );
+            if egui::color_picker::color_edit_button_srgba(
+                ui,
+                &mut rgba,
+                egui::color_picker::Alpha::Opaque,
+            ).changed() {
+                *color = Some([rgba.r(), rgba.g(), rgba.b()]);
+                changed = true;
+            }
         }
     });
 
-    if enabled {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            for (i, ch) in ["R", "G", "B"].iter().enumerate() {
-                ui.label(egui::RichText::new(*ch).size(9.0).color(egui::Color32::GRAY));
-                let mut val = rgb[i] as i32;
-                let resp = ui.add(
-                    egui::DragValue::new(&mut val)
-                        .range(0..=255)
-                        .speed(1)
-                        .custom_formatter(|v, _| format!("{}", v as u8)),
-                );
-                if resp.changed() {
-                    rgb[i] = val.clamp(0, 255) as u8;
-                    *color = Some(rgb);
-                    changed = true;
-                }
-            }
-        });
-    }
     ui.add_space(4.0);
     changed
 }
