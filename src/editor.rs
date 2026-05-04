@@ -18,7 +18,7 @@ pub enum InteractionState {
     Idle,
     PlacingNode { shape: NodeShape },
     ConnectingEdge { source_id: String },
-    DraggingNode { node_id: String },
+    DraggingNode { node_id: String, unsnapped: (f32, f32) },
 }
 
 #[derive(Clone)]
@@ -1536,8 +1536,21 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         InteractionState::ConnectingEdge { .. }
     );
 
+    let is_dragging_node = matches!(
+        state.interaction,
+        InteractionState::DraggingNode { .. }
+    );
+    let has_selection = !state.selected_nodes.is_empty();
+
+    let pan_buttons = if is_dragging_node || has_selection || is_connecting {
+        egui::DragPanButtons::MIDDLE | egui::DragPanButtons::SECONDARY
+    } else {
+        egui::DragPanButtons::all()
+    };
+
     let _scene_response = egui::Scene::new()
         .zoom_range(0.05..=8.0)
+        .drag_pan_buttons(pan_buttons)
         .show(ui, &mut state.scene_rect, |scene_ui| {
             scene_ui
                 .painter()
@@ -1639,8 +1652,8 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         ui.ctx().request_repaint();
     }
 
-    let primary_clicked = ui.input(|i| i.pointer.primary_clicked());
-    if primary_clicked {
+    let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
+    if primary_pressed {
         if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
             if viewport_rect.contains(pointer_pos) {
                 let shift_held = ui.input(|i| i.modifiers.shift);
@@ -1653,17 +1666,21 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
     let dragging = ui.input(|i| i.pointer.primary_down());
     let drag_delta = ui.input(|i| i.pointer.delta());
     if dragging && drag_delta.length() > 0.0 {
-        if let InteractionState::DraggingNode { ref node_id } = state.interaction {
+        if let InteractionState::DraggingNode { ref node_id, ref mut unsnapped } = state.interaction {
             let scale_x = viewport_rect.width() / scene_rect_before.width();
             let scale_y = viewport_rect.height() / scene_rect_before.height();
             let zoom = scale_x.min(scale_y);
             let scene_delta_x = drag_delta.x / zoom;
             let scene_delta_y = drag_delta.y / zoom;
+            unsnapped.0 += scene_delta_x;
+            unsnapped.1 += scene_delta_y;
+            let snapped = snap_to_grid(unsnapped.0, unsnapped.1);
             if let Some(pos) = state.manual_positions.get_mut(node_id) {
-                let snapped = snap_to_grid(pos.0 + scene_delta_x, pos.1 + scene_delta_y);
-                *pos = snapped;
-                state.dirty = true;
-                state.rebuild_layout();
+                if *pos != snapped {
+                    *pos = snapped;
+                    state.dirty = true;
+                    state.rebuild_layout();
+                }
             }
         }
     }
@@ -1725,7 +1742,8 @@ fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2, shift: bo
                     state.selected_nodes.insert(node_id.clone());
                 }
                 state.selected_edge = None;
-                state.interaction = InteractionState::DraggingNode { node_id };
+                let unsnapped = state.manual_positions.get(&node_id).copied().unwrap_or((0.0, 0.0));
+                state.interaction = InteractionState::DraggingNode { node_id, unsnapped };
             } else if let Some(edge_idx) = state.edge_at_scene_pos(scene_pos) {
                 state.selected_nodes.clear();
                 state.selected_edge = Some(edge_idx);
