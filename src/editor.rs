@@ -10,6 +10,7 @@ use std::path::PathBuf;
 pub enum EditorAction {
     None,
     OpenFile(PathBuf, parser::DiagramFormat),
+    EditFile(PathBuf, parser::DiagramFormat),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +19,20 @@ pub enum InteractionState {
     PlacingNode { shape: NodeShape },
     ConnectingEdge { source_id: String },
     DraggingNode { node_id: String },
+}
+
+#[derive(Clone)]
+struct ClipboardData {
+    nodes: HashMap<String, NodeDef>,
+    positions: HashMap<String, (f32, f32)>,
+    edges: Vec<EdgeDef>,
+    styles: HashMap<String, StyleProps>,
+}
+
+struct UndoSnapshot {
+    graph: DiagramGraph,
+    manual_positions: HashMap<String, (f32, f32)>,
+    next_node_id: u32,
 }
 
 pub struct EditorState {
@@ -34,6 +49,9 @@ pub struct EditorState {
     pub dirty: bool,
     pub scene_rect: egui::Rect,
     pub full_scene_rect: egui::Rect,
+    undo_stack: Vec<UndoSnapshot>,
+    redo_stack: Vec<UndoSnapshot>,
+    clipboard: Option<ClipboardData>,
 }
 
 impl EditorState {
@@ -65,7 +83,167 @@ impl EditorState {
             dirty: false,
             scene_rect: scene,
             full_scene_rect: scene,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            clipboard: None,
         }
+    }
+
+    pub fn from_file(
+        path: PathBuf,
+        format: parser::DiagramFormat,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let source = std::fs::read_to_string(&path)?;
+        let base_dir = path.parent();
+        let graph = parser::parse(&source, format, 0, base_dir)?;
+        let mut state = Self::new();
+
+        let mut max_id = 0u32;
+        for key in graph.nodes.keys() {
+            if let Some(rest) = key.strip_prefix("node_") {
+                if let Ok(n) = rest.parse::<u32>() {
+                    max_id = max_id.max(n);
+                }
+            }
+        }
+        state.next_node_id = max_id + 1;
+        state.graph = graph;
+        state.file_path = Some(path);
+        state.dirty = false;
+        Ok(state)
+    }
+
+    fn push_undo(&mut self) {
+        self.undo_stack.push(UndoSnapshot {
+            graph: self.graph.clone(),
+            manual_positions: self.manual_positions.clone(),
+            next_node_id: self.next_node_id,
+        });
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+        self.redo_stack.clear();
+    }
+
+    fn undo(&mut self) {
+        if let Some(snapshot) = self.undo_stack.pop() {
+            self.redo_stack.push(UndoSnapshot {
+                graph: self.graph.clone(),
+                manual_positions: self.manual_positions.clone(),
+                next_node_id: self.next_node_id,
+            });
+            self.graph = snapshot.graph;
+            self.manual_positions = snapshot.manual_positions;
+            self.next_node_id = snapshot.next_node_id;
+            self.selected_nodes.clear();
+            self.selected_edge = None;
+            self.dirty = true;
+            self.rebuild_layout();
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(snapshot) = self.redo_stack.pop() {
+            self.undo_stack.push(UndoSnapshot {
+                graph: self.graph.clone(),
+                manual_positions: self.manual_positions.clone(),
+                next_node_id: self.next_node_id,
+            });
+            self.graph = snapshot.graph;
+            self.manual_positions = snapshot.manual_positions;
+            self.next_node_id = snapshot.next_node_id;
+            self.selected_nodes.clear();
+            self.selected_edge = None;
+            self.dirty = true;
+            self.rebuild_layout();
+        }
+    }
+
+    fn copy_selection(&mut self) {
+        if self.selected_nodes.is_empty() {
+            return;
+        }
+        let mut nodes = HashMap::new();
+        let mut positions = HashMap::new();
+        let mut styles = HashMap::new();
+
+        for id in &self.selected_nodes {
+            if let Some(node) = self.graph.nodes.get(id) {
+                nodes.insert(id.clone(), node.clone());
+            }
+            if let Some(pos) = self.manual_positions.get(id) {
+                positions.insert(id.clone(), *pos);
+            }
+            if let Some(style) = self.graph.styles.get(id) {
+                styles.insert(id.clone(), style.clone());
+            }
+        }
+
+        let edges: Vec<EdgeDef> = self
+            .graph
+            .edges
+            .iter()
+            .filter(|e| self.selected_nodes.contains(&e.from) && self.selected_nodes.contains(&e.to))
+            .cloned()
+            .collect();
+
+        self.clipboard = Some(ClipboardData {
+            nodes,
+            positions,
+            edges,
+            styles,
+        });
+    }
+
+    fn paste_clipboard(&mut self) {
+        let clip = match self.clipboard.clone() {
+            Some(c) => c,
+            None => return,
+        };
+        if clip.nodes.is_empty() {
+            return;
+        }
+
+        self.push_undo();
+
+        let mut id_map: HashMap<String, String> = HashMap::new();
+        for old_id in clip.nodes.keys() {
+            let new_id = self.gen_node_id();
+            id_map.insert(old_id.clone(), new_id);
+        }
+
+        for (old_id, node) in &clip.nodes {
+            let new_id = &id_map[old_id];
+            let mut new_node = node.clone();
+            new_node.label = new_id.clone();
+            self.graph.nodes.insert(new_id.clone(), new_node);
+
+            if let Some(pos) = clip.positions.get(old_id) {
+                self.manual_positions
+                    .insert(new_id.clone(), (pos.0 + 50.0, pos.1 + 50.0));
+            }
+            if let Some(style) = clip.styles.get(old_id) {
+                self.graph.styles.insert(new_id.clone(), style.clone());
+            }
+        }
+
+        for edge in &clip.edges {
+            if let (Some(new_from), Some(new_to)) = (id_map.get(&edge.from), id_map.get(&edge.to))
+            {
+                let mut new_edge = edge.clone();
+                new_edge.from = new_from.clone();
+                new_edge.to = new_to.clone();
+                self.graph.edges.push(new_edge);
+            }
+        }
+
+        self.selected_nodes.clear();
+        for new_id in id_map.values() {
+            self.selected_nodes.insert(new_id.clone());
+        }
+        self.selected_edge = None;
+        self.dirty = true;
+        self.rebuild_layout();
     }
 
     fn gen_node_id(&mut self) -> String {
@@ -75,6 +253,7 @@ impl EditorState {
     }
 
     fn place_node(&mut self, shape: NodeShape, scene_pos: egui::Pos2) {
+        self.push_undo();
         let id = self.gen_node_id();
         self.graph.nodes.insert(
             id.clone(),
@@ -90,13 +269,14 @@ impl EditorState {
                 link: None,
             },
         );
-        self.manual_positions
-            .insert(id, (scene_pos.x, scene_pos.y));
+        let snapped = snap_to_grid(scene_pos.x, scene_pos.y);
+        self.manual_positions.insert(id, snapped);
         self.dirty = true;
         self.rebuild_layout();
     }
 
     fn add_edge(&mut self, from: String, to: String) {
+        self.push_undo();
         self.graph.edges.push(EdgeDef {
             from,
             to,
@@ -177,7 +357,32 @@ impl EditorState {
         None
     }
 
+    fn edge_at_scene_pos(&self, scene_pos: egui::Pos2) -> Option<usize> {
+        let layout = self.layout_result.as_ref()?;
+        let threshold = 8.0;
+        for (i, edge) in layout.edges.iter().enumerate() {
+            if edge.points.len() < 2 {
+                continue;
+            }
+            for pair in edge.points.windows(2) {
+                let dist = point_to_segment_distance(
+                    scene_pos.x,
+                    scene_pos.y,
+                    pair[0][0],
+                    pair[0][1],
+                    pair[1][0],
+                    pair[1][1],
+                );
+                if dist < threshold {
+                    return Some(i);
+                }
+            }
+        }
+        None
+    }
+
     fn auto_layout(&mut self) {
+        self.push_undo();
         if let Some(sizes) = &self.node_sizes {
             if let Ok(result) = layout::compute_layout(&self.graph, Some(sizes)) {
                 for node in &result.nodes {
@@ -203,15 +408,50 @@ impl EditorState {
     }
 }
 
-const TOOLBAR_SHAPES: &[(NodeShape, &str)] = &[
-    (NodeShape::Rect, "Rect"),
-    (NodeShape::Rounded, "Rounded"),
-    (NodeShape::Diamond, "Diamond"),
-    (NodeShape::Circle, "Circle"),
-    (NodeShape::Hexagon, "Hexagon"),
-    (NodeShape::Parallelogram, "Parallel"),
-    (NodeShape::Stadium, "Stadium"),
-    (NodeShape::Cylinder, "Cylinder"),
+const TOOLBAR_SHAPES: &[(&str, &[(NodeShape, &str)])] = &[
+    (
+        "Basic",
+        &[
+            (NodeShape::Rect, "Rect"),
+            (NodeShape::Rounded, "Rounded"),
+            (NodeShape::Diamond, "Diamond"),
+            (NodeShape::Circle, "Circle"),
+            (NodeShape::Oval, "Oval"),
+            (NodeShape::Stadium, "Stadium"),
+        ],
+    ),
+    (
+        "Flow",
+        &[
+            (NodeShape::Hexagon, "Hexagon"),
+            (NodeShape::Parallelogram, "Parallel"),
+            (NodeShape::Trapezoid, "Trapezoid"),
+            (NodeShape::TrapezoidAlt, "Trap Alt"),
+            (NodeShape::Flag, "Flag"),
+            (NodeShape::Step, "Step"),
+        ],
+    ),
+    (
+        "Data",
+        &[
+            (NodeShape::Cylinder, "Cylinder"),
+            (NodeShape::Document, "Document"),
+            (NodeShape::StoredData, "Stored"),
+            (NodeShape::Page, "Page"),
+            (NodeShape::Queue, "Queue"),
+        ],
+    ),
+    (
+        "Other",
+        &[
+            (NodeShape::Package, "Package"),
+            (NodeShape::Callout, "Callout"),
+            (NodeShape::Cloud, "Cloud"),
+            (NodeShape::Person, "Person"),
+            (NodeShape::Subroutine, "Subroutine"),
+            (NodeShape::DoubleCircle, "Dbl Circle"),
+        ],
+    ),
 ];
 
 pub fn render_editor_ui(state: &mut EditorState, ui: &mut egui::Ui) -> EditorAction {
@@ -219,9 +459,16 @@ pub fn render_editor_ui(state: &mut EditorState, ui: &mut egui::Ui) -> EditorAct
 
     let measured = renderer::measure_node_texts(ui, &Some(state.graph.clone()));
     if let Some(sizes) = measured {
+        let needs_initial_layout =
+            state.manual_positions.is_empty() && !state.graph.nodes.is_empty();
         if state.node_sizes.as_ref() != Some(&sizes) {
             state.node_sizes = Some(sizes);
-            state.rebuild_layout();
+            if needs_initial_layout {
+                state.auto_layout();
+                state.dirty = false;
+            } else {
+                state.rebuild_layout();
+            }
         }
     }
 
@@ -258,7 +505,7 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                         ui.close();
                         *state = EditorState::new();
                     }
-                    if ui.button("Open...").clicked() {
+                    if ui.button("Open in Viewer...").clicked() {
                         ui.close();
                         let cwd = std::env::current_dir().unwrap_or_default();
                         let dialog = rfd::FileDialog::new()
@@ -271,11 +518,24 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                             }
                         }
                     }
+                    if ui.button("Open for Editing...").clicked() {
+                        ui.close();
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let dialog = rfd::FileDialog::new()
+                            .set_directory(&cwd)
+                            .add_filter("Diagram files", &["mmd", "dsl", "d2"])
+                            .add_filter("All files", &["*"]);
+                        if let Some(path) = dialog.pick_file() {
+                            if let Some(fmt) = parser::detect_format(&path) {
+                                action = EditorAction::EditFile(path, fmt);
+                            }
+                        }
+                    }
                     ui.separator();
                     if ui.button("Save").clicked() {
                         ui.close();
                         if let Some(path) = &state.file_path {
-                            let text = serializer::mermaid::serialize(&state.graph);
+                            let text = serialize_for_path(path, &state.graph);
                             if let Err(e) = std::fs::write(path, &text) {
                                 eprintln!("Save error: {e}");
                             } else {
@@ -289,9 +549,10 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                         let dialog = rfd::FileDialog::new()
                             .set_directory(&cwd)
                             .add_filter("Mermaid", &["mmd"])
+                            .add_filter("D2", &["d2"])
                             .set_file_name("diagram.mmd");
                         if let Some(path) = dialog.save_file() {
-                            let text = serializer::mermaid::serialize(&state.graph);
+                            let text = serialize_for_path(&path, &state.graph);
                             if let Err(e) = std::fs::write(&path, &text) {
                                 eprintln!("Save error: {e}");
                             } else {
@@ -303,6 +564,32 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                     ui.separator();
                     if ui.button("Quit").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+                ui.menu_button("Edit", |ui| {
+                    let undo_label = if state.undo_stack.is_empty() {
+                        "Undo"
+                    } else {
+                        "Undo (Ctrl+Z)"
+                    };
+                    if ui
+                        .add_enabled(!state.undo_stack.is_empty(), egui::Button::new(undo_label))
+                        .clicked()
+                    {
+                        ui.close();
+                        state.undo();
+                    }
+                    let redo_label = if state.redo_stack.is_empty() {
+                        "Redo"
+                    } else {
+                        "Redo (Ctrl+Shift+Z)"
+                    };
+                    if ui
+                        .add_enabled(!state.redo_stack.is_empty(), egui::Button::new(redo_label))
+                        .clicked()
+                    {
+                        ui.close();
+                        state.redo();
                     }
                 });
                 ui.menu_button("Diagram", |ui| {
@@ -328,6 +615,7 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                                     .selectable_label(current_dir == d, dir_label(d))
                                     .clicked()
                                 {
+                                    state.push_undo();
                                     state.graph.direction = d;
                                     state.dirty = true;
                                     ui.close();
@@ -342,10 +630,465 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
     action
 }
 
+fn serialize_for_path(path: &std::path::Path, graph: &DiagramGraph) -> String {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("d2") => serializer::d2::serialize(graph),
+        _ => serializer::mermaid::serialize(graph),
+    }
+}
+
+fn color_edit_row(ui: &mut egui::Ui, label: &str, color: &mut Option<[u8; 3]>) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(label)
+                .size(11.0)
+                .color(egui::Color32::from_rgb(80, 80, 80)),
+        );
+    });
+
+    let mut enabled = color.is_some();
+    let mut rgb = color.unwrap_or([200, 200, 200]);
+
+    ui.horizontal(|ui| {
+        if ui.checkbox(&mut enabled, "").changed() {
+            changed = true;
+            if enabled {
+                *color = Some(rgb);
+            } else {
+                *color = None;
+            }
+        }
+        if enabled {
+            let preview = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+            let (rect, _) = ui.allocate_exact_size(
+                egui::Vec2::new(16.0, 16.0),
+                egui::Sense::hover(),
+            );
+            ui.painter()
+                .rect_filled(rect, 2.0, preview);
+            ui.painter().rect_stroke(
+                rect,
+                2.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 120, 120)),
+                egui::StrokeKind::Outside,
+            );
+        }
+    });
+
+    if enabled {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for (i, ch) in ["R", "G", "B"].iter().enumerate() {
+                ui.label(egui::RichText::new(*ch).size(9.0).color(egui::Color32::GRAY));
+                let mut val = rgb[i] as i32;
+                let resp = ui.add(
+                    egui::DragValue::new(&mut val)
+                        .range(0..=255)
+                        .speed(1)
+                        .custom_formatter(|v, _| format!("{}", v as u8)),
+                );
+                if resp.changed() {
+                    rgb[i] = val.clamp(0, 255) as u8;
+                    *color = Some(rgb);
+                    changed = true;
+                }
+            }
+        });
+    }
+    ui.add_space(4.0);
+    changed
+}
+
+fn shape_display_name(s: NodeShape) -> &'static str {
+    for &(_, shapes) in TOOLBAR_SHAPES {
+        for &(shape, name) in shapes {
+            if shape == s {
+                return name;
+            }
+        }
+    }
+    "Other"
+}
+
+fn text_tool_button(ui: &mut egui::Ui, label: &str, is_active: bool) -> egui::Response {
+    let btn = egui::Button::new(
+        egui::RichText::new(label)
+            .size(10.0)
+            .color(if is_active {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::from_rgb(40, 40, 40)
+            }),
+    )
+    .min_size(egui::Vec2::new(72.0, 24.0))
+    .fill(if is_active {
+        egui::Color32::from_rgb(70, 130, 200)
+    } else {
+        egui::Color32::from_rgb(255, 255, 255)
+    })
+    .stroke(egui::Stroke::new(
+        1.0,
+        if is_active {
+            egui::Color32::from_rgb(50, 100, 170)
+        } else {
+            egui::Color32::from_rgb(180, 180, 180)
+        },
+    ));
+    ui.add(btn)
+}
+
+fn shape_icon_button(
+    ui: &mut egui::Ui,
+    shape: NodeShape,
+    name: &str,
+    is_active: bool,
+) -> egui::Response {
+    let size = egui::Vec2::new(34.0, 28.0);
+    let fill = if is_active {
+        egui::Color32::from_rgb(70, 130, 200)
+    } else {
+        egui::Color32::from_rgb(255, 255, 255)
+    };
+    let stroke_color = if is_active {
+        egui::Color32::from_rgb(50, 100, 170)
+    } else {
+        egui::Color32::from_rgb(180, 180, 180)
+    };
+    let icon_color = if is_active {
+        egui::Color32::WHITE
+    } else {
+        egui::Color32::from_rgb(60, 60, 60)
+    };
+
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        ui.painter()
+            .rect_filled(rect, 3.0, fill);
+        ui.painter().rect_stroke(
+            rect,
+            3.0,
+            egui::Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Outside,
+        );
+        let icon_stroke = egui::Stroke::new(1.5, icon_color);
+        draw_shape_icon(ui.painter(), rect.shrink(5.0), shape, icon_stroke, icon_color);
+    }
+    response.on_hover_text(name)
+}
+
+fn draw_shape_icon(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    shape: NodeShape,
+    stroke: egui::Stroke,
+    fill: egui::Color32,
+) {
+    let c = rect.center();
+    let w = rect.width();
+    let h = rect.height();
+    let hw = w / 2.0;
+    let hh = h / 2.0;
+
+    match shape {
+        NodeShape::Rect => {
+            painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
+        }
+        NodeShape::Rounded => {
+            painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Outside);
+        }
+        NodeShape::Diamond => {
+            let pts = vec![
+                egui::Pos2::new(c.x, c.y - hh),
+                egui::Pos2::new(c.x + hw, c.y),
+                egui::Pos2::new(c.x, c.y + hh),
+                egui::Pos2::new(c.x - hw, c.y),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+        }
+        NodeShape::Circle | NodeShape::DoubleCircle => {
+            let r = hw.min(hh);
+            painter.circle_stroke(c, r, stroke);
+            if shape == NodeShape::DoubleCircle {
+                painter.circle_stroke(c, r - 3.0, stroke);
+            }
+        }
+        NodeShape::Oval => {
+            painter.rect_stroke(rect, hw, stroke, egui::StrokeKind::Outside);
+        }
+        NodeShape::Stadium => {
+            painter.rect_stroke(rect, hh, stroke, egui::StrokeKind::Outside);
+        }
+        NodeShape::Hexagon => {
+            let inset = hw * 0.3;
+            let pts = vec![
+                egui::Pos2::new(c.x - hw + inset, c.y - hh),
+                egui::Pos2::new(c.x + hw - inset, c.y - hh),
+                egui::Pos2::new(c.x + hw, c.y),
+                egui::Pos2::new(c.x + hw - inset, c.y + hh),
+                egui::Pos2::new(c.x - hw + inset, c.y + hh),
+                egui::Pos2::new(c.x - hw, c.y),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+        }
+        NodeShape::Parallelogram => {
+            let skew = hw * 0.3;
+            let pts = vec![
+                egui::Pos2::new(c.x - hw + skew, c.y - hh),
+                egui::Pos2::new(c.x + hw, c.y - hh),
+                egui::Pos2::new(c.x + hw - skew, c.y + hh),
+                egui::Pos2::new(c.x - hw, c.y + hh),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+        }
+        NodeShape::Trapezoid => {
+            let inset = hw * 0.25;
+            let pts = vec![
+                egui::Pos2::new(c.x - hw + inset, c.y - hh),
+                egui::Pos2::new(c.x + hw - inset, c.y - hh),
+                egui::Pos2::new(c.x + hw, c.y + hh),
+                egui::Pos2::new(c.x - hw, c.y + hh),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+        }
+        NodeShape::TrapezoidAlt => {
+            let inset = hw * 0.25;
+            let pts = vec![
+                egui::Pos2::new(c.x - hw, c.y - hh),
+                egui::Pos2::new(c.x + hw, c.y - hh),
+                egui::Pos2::new(c.x + hw - inset, c.y + hh),
+                egui::Pos2::new(c.x - hw + inset, c.y + hh),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+        }
+        NodeShape::Flag => {
+            let pts = vec![
+                egui::Pos2::new(c.x - hw, c.y - hh),
+                egui::Pos2::new(c.x + hw, c.y - hh),
+                egui::Pos2::new(c.x + hw - hw * 0.25, c.y),
+                egui::Pos2::new(c.x + hw, c.y + hh),
+                egui::Pos2::new(c.x - hw, c.y + hh),
+            ];
+            painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+        }
+        NodeShape::Step => {
+            let notch = hw * 0.3;
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw, c.y - hh), egui::Pos2::new(c.x + hw - notch, c.y - hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw - notch, c.y - hh), egui::Pos2::new(c.x + hw, c.y)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw, c.y), egui::Pos2::new(c.x + hw - notch, c.y + hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw - notch, c.y + hh), egui::Pos2::new(c.x - hw, c.y + hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw, c.y + hh), egui::Pos2::new(c.x - hw, c.y - hh)],
+                stroke,
+            );
+        }
+        NodeShape::Cylinder => {
+            let ey = hh * 0.3;
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw, c.y - hh + ey), egui::Pos2::new(c.x - hw, c.y + hh - ey)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw, c.y - hh + ey), egui::Pos2::new(c.x + hw, c.y + hh - ey)],
+                stroke,
+            );
+            let top_r = egui::Rect::from_center_size(
+                egui::Pos2::new(c.x, c.y - hh + ey),
+                egui::Vec2::new(w, ey * 2.0),
+            );
+            painter.rect_stroke(top_r, hw, stroke, egui::StrokeKind::Outside);
+            let bot_c = egui::Pos2::new(c.x, c.y + hh - ey);
+            painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape::from_points_stroke(
+                [
+                    egui::Pos2::new(c.x - hw, bot_c.y),
+                    egui::Pos2::new(c.x - hw, bot_c.y + ey * 1.5),
+                    egui::Pos2::new(c.x + hw, bot_c.y + ey * 1.5),
+                    egui::Pos2::new(c.x + hw, bot_c.y),
+                ],
+                false,
+                egui::Color32::TRANSPARENT,
+                stroke,
+            )));
+        }
+        NodeShape::Document => {
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw, c.y - hh), egui::Pos2::new(c.x + hw, c.y - hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw, c.y - hh), egui::Pos2::new(c.x + hw, c.y + hh * 0.6)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw, c.y + hh * 0.6), egui::Pos2::new(c.x - hw, c.y - hh)],
+                stroke,
+            );
+            painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape::from_points_stroke(
+                [
+                    egui::Pos2::new(c.x + hw, c.y + hh * 0.6),
+                    egui::Pos2::new(c.x + hw * 0.3, c.y + hh * 1.2),
+                    egui::Pos2::new(c.x - hw * 0.3, c.y + hh * 0.2),
+                    egui::Pos2::new(c.x - hw, c.y + hh * 0.6),
+                ],
+                false,
+                egui::Color32::TRANSPARENT,
+                stroke,
+            )));
+        }
+        NodeShape::Page => {
+            let fold = hw * 0.35;
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw, c.y - hh), egui::Pos2::new(c.x + hw - fold, c.y - hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw - fold, c.y - hh), egui::Pos2::new(c.x + hw, c.y - hh + fold)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw, c.y - hh + fold), egui::Pos2::new(c.x + hw, c.y + hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw, c.y + hh), egui::Pos2::new(c.x - hw, c.y + hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw, c.y + hh), egui::Pos2::new(c.x - hw, c.y - hh)],
+                stroke,
+            );
+        }
+        NodeShape::StoredData => {
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw * 0.7, c.y - hh), egui::Pos2::new(c.x + hw, c.y - hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw, c.y - hh), egui::Pos2::new(c.x + hw, c.y + hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw, c.y + hh), egui::Pos2::new(c.x - hw * 0.7, c.y + hh)],
+                stroke,
+            );
+            painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape::from_points_stroke(
+                [
+                    egui::Pos2::new(c.x - hw * 0.7, c.y - hh),
+                    egui::Pos2::new(c.x - hw * 1.2, c.y - hh * 0.3),
+                    egui::Pos2::new(c.x - hw * 1.2, c.y + hh * 0.3),
+                    egui::Pos2::new(c.x - hw * 0.7, c.y + hh),
+                ],
+                false,
+                egui::Color32::TRANSPARENT,
+                stroke,
+            )));
+        }
+        NodeShape::Queue => {
+            let ey = hw * 0.35;
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw + ey, c.y - hh), egui::Pos2::new(c.x + hw - ey, c.y - hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw + ey, c.y + hh), egui::Pos2::new(c.x + hw - ey, c.y + hh)],
+                stroke,
+            );
+            painter.circle_stroke(egui::Pos2::new(c.x - hw + ey, c.y), hh, stroke);
+            painter.circle_stroke(egui::Pos2::new(c.x + hw - ey, c.y), hh, stroke);
+        }
+        NodeShape::Package => {
+            painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
+            let tab_w = w * 0.4;
+            let tab_h = h * 0.2;
+            let tab = egui::Rect::from_min_size(
+                egui::Pos2::new(rect.left(), rect.top() - tab_h),
+                egui::Vec2::new(tab_w, tab_h),
+            );
+            painter.rect_stroke(tab, 0.0, stroke, egui::StrokeKind::Outside);
+        }
+        NodeShape::Callout => {
+            painter.rect_stroke(
+                rect.shrink2(egui::Vec2::new(0.0, hh * 0.15)),
+                2.0,
+                stroke,
+                egui::StrokeKind::Outside,
+            );
+            let tail_x = c.x - hw * 0.3;
+            painter.line_segment(
+                [
+                    egui::Pos2::new(tail_x, c.y + hh * 0.85),
+                    egui::Pos2::new(tail_x - hw * 0.2, c.y + hh),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    egui::Pos2::new(tail_x - hw * 0.2, c.y + hh),
+                    egui::Pos2::new(tail_x + hw * 0.15, c.y + hh * 0.85),
+                ],
+                stroke,
+            );
+        }
+        NodeShape::Cloud => {
+            let r = hw.min(hh) * 0.9;
+            painter.circle_stroke(c, r, stroke);
+            painter.circle_stroke(egui::Pos2::new(c.x - r * 0.6, c.y + r * 0.2), r * 0.5, stroke);
+            painter.circle_stroke(egui::Pos2::new(c.x + r * 0.5, c.y - r * 0.1), r * 0.55, stroke);
+        }
+        NodeShape::Person => {
+            let head_r = hh * 0.3;
+            painter.circle_stroke(egui::Pos2::new(c.x, c.y - hh + head_r), head_r, stroke);
+            painter.line_segment(
+                [egui::Pos2::new(c.x, c.y - hh + head_r * 2.0), egui::Pos2::new(c.x, c.y + hh * 0.3)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw * 0.6, c.y - hh * 0.1), egui::Pos2::new(c.x + hw * 0.6, c.y - hh * 0.1)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x, c.y + hh * 0.3), egui::Pos2::new(c.x - hw * 0.4, c.y + hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x, c.y + hh * 0.3), egui::Pos2::new(c.x + hw * 0.4, c.y + hh)],
+                stroke,
+            );
+        }
+        NodeShape::Subroutine => {
+            painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
+            let inset = hw * 0.2;
+            painter.line_segment(
+                [egui::Pos2::new(c.x - hw + inset, c.y - hh), egui::Pos2::new(c.x - hw + inset, c.y + hh)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::Pos2::new(c.x + hw - inset, c.y - hh), egui::Pos2::new(c.x + hw - inset, c.y + hh)],
+                stroke,
+            );
+        }
+        _ => {
+            painter.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Outside);
+        }
+    }
+}
+
 fn render_toolbar(state: &mut EditorState, ui: &mut egui::Ui) {
     egui::Panel::left("editor_toolbar")
         .resizable(false)
-        .exact_size(80.0)
+        .exact_size(84.0)
         .frame(
             egui::Frame::new()
                 .fill(egui::Color32::from_rgb(240, 240, 240))
@@ -356,89 +1099,43 @@ fn render_toolbar(state: &mut EditorState, ui: &mut egui::Ui) {
                 )),
         )
         .show_inside(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    egui::RichText::new("Shapes")
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(80, 80, 80)),
-                );
-                ui.add_space(4.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for &(group_name, shapes) in TOOLBAR_SHAPES {
+                    ui.label(
+                        egui::RichText::new(group_name)
+                            .size(9.0)
+                            .color(egui::Color32::from_rgb(120, 120, 120)),
+                    );
+                    ui.add_space(1.0);
 
-                for &(shape, name) in TOOLBAR_SHAPES {
-                    let is_active = state.interaction == InteractionState::PlacingNode { shape };
-                    let btn = egui::Button::new(
-                        egui::RichText::new(name)
-                            .size(11.0)
-                            .color(if is_active {
-                                egui::Color32::WHITE
-                            } else {
-                                egui::Color32::from_rgb(40, 40, 40)
-                            }),
-                    )
-                    .min_size(egui::Vec2::new(72.0, 28.0))
-                    .fill(if is_active {
-                        egui::Color32::from_rgb(70, 130, 200)
-                    } else {
-                        egui::Color32::from_rgb(255, 255, 255)
-                    })
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        if is_active {
-                            egui::Color32::from_rgb(50, 100, 170)
-                        } else {
-                            egui::Color32::from_rgb(180, 180, 180)
-                        },
-                    ));
-
-                    if ui.add(btn).clicked() {
-                        if is_active {
-                            state.interaction = InteractionState::Idle;
-                        } else {
-                            state.interaction = InteractionState::PlacingNode { shape };
-                        }
+                    let mut chunks = shapes.chunks(2);
+                    while let Some(row) = chunks.next() {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            for &(shape, name) in row {
+                                let is_active =
+                                    state.interaction == InteractionState::PlacingNode { shape };
+                                if shape_icon_button(ui, shape, name, is_active).clicked() {
+                                    state.interaction = if is_active {
+                                        InteractionState::Idle
+                                    } else {
+                                        InteractionState::PlacingNode { shape }
+                                    };
+                                }
+                            }
+                        });
                     }
+                    ui.add_space(3.0);
                 }
 
-                ui.add_space(8.0);
                 ui.separator();
-                ui.add_space(4.0);
-
-                ui.label(
-                    egui::RichText::new("Tools")
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(80, 80, 80)),
-                );
-                ui.add_space(4.0);
+                ui.add_space(2.0);
 
                 let edge_active = matches!(
                     state.interaction,
                     InteractionState::ConnectingEdge { .. }
                 );
-                let edge_btn = egui::Button::new(
-                    egui::RichText::new("Edge")
-                        .size(11.0)
-                        .color(if edge_active {
-                            egui::Color32::WHITE
-                        } else {
-                            egui::Color32::from_rgb(40, 40, 40)
-                        }),
-                )
-                .min_size(egui::Vec2::new(72.0, 28.0))
-                .fill(if edge_active {
-                    egui::Color32::from_rgb(70, 130, 200)
-                } else {
-                    egui::Color32::from_rgb(255, 255, 255)
-                })
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    if edge_active {
-                        egui::Color32::from_rgb(50, 100, 170)
-                    } else {
-                        egui::Color32::from_rgb(180, 180, 180)
-                    },
-                ));
-
-                if ui.add(edge_btn).clicked() {
+                if text_tool_button(ui, "Edge", edge_active).clicked() {
                     state.interaction = if edge_active {
                         InteractionState::Idle
                     } else {
@@ -448,27 +1145,30 @@ fn render_toolbar(state: &mut EditorState, ui: &mut egui::Ui) {
                     };
                 }
 
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
+                ui.add_space(2.0);
 
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Auto Layout")
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(40, 40, 40)),
-                        )
-                        .min_size(egui::Vec2::new(72.0, 28.0))
-                        .fill(egui::Color32::from_rgb(255, 255, 255))
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            egui::Color32::from_rgb(180, 180, 180),
-                        )),
-                    )
-                    .clicked()
-                {
+                if text_tool_button(ui, "Auto Layout", false).clicked() {
                     state.auto_layout();
+                }
+
+                if state.selected_nodes.len() >= 2 {
+                    ui.add_space(2.0);
+                    if text_tool_button(ui, "Group", false).clicked() {
+                        state.push_undo();
+                        let next = state.graph.subgraphs.len() + 1;
+                        let title = format!("Group {next}");
+                        let node_ids: Vec<String> =
+                            state.selected_nodes.iter().cloned().collect();
+                        state.graph.subgraphs.push(SubgraphDef {
+                            title,
+                            node_ids,
+                            grid_rows: None,
+                            grid_columns: None,
+                            grid_gap: None,
+                        });
+                        state.dirty = true;
+                        state.rebuild_layout();
+                    }
                 }
             });
         });
@@ -511,7 +1211,11 @@ fn render_properties_panel(state: &mut EditorState, ui: &mut egui::Ui) {
                 );
                 ui.add_space(4.0);
 
-                if let Some(node) = state.graph.nodes.get_mut(&node_id) {
+                let mut new_label: Option<String> = None;
+                let mut new_shape: Option<NodeShape> = None;
+                let mut needs_undo = false;
+
+                if let Some(node) = state.graph.nodes.get(&node_id) {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Label:")
@@ -525,9 +1229,11 @@ fn render_properties_panel(state: &mut EditorState, ui: &mut egui::Ui) {
                             .desired_width(160.0)
                             .font(egui::FontId::proportional(12.0)),
                     );
+                    if response.gained_focus() {
+                        needs_undo = true;
+                    }
                     if response.changed() {
-                        node.label = label;
-                        state.dirty = true;
+                        new_label = Some(label);
                     }
 
                     ui.add_space(8.0);
@@ -540,32 +1246,68 @@ fn render_properties_panel(state: &mut EditorState, ui: &mut egui::Ui) {
                     });
 
                     let current_shape = node.shape;
-                    let shape_name = |s: NodeShape| match s {
-                        NodeShape::Rect => "Rect",
-                        NodeShape::Rounded => "Rounded",
-                        NodeShape::Diamond => "Diamond",
-                        NodeShape::Circle => "Circle",
-                        NodeShape::Hexagon => "Hexagon",
-                        NodeShape::Parallelogram => "Parallel",
-                        NodeShape::Stadium => "Stadium",
-                        NodeShape::Cylinder => "Cylinder",
-                        _ => "Other",
-                    };
 
                     egui::ComboBox::from_id_salt("shape_combo")
-                        .selected_text(shape_name(current_shape))
+                        .selected_text(shape_display_name(current_shape))
                         .width(160.0)
                         .show_ui(ui, |ui| {
-                            for &(shape, name) in TOOLBAR_SHAPES {
-                                if ui
-                                    .selectable_label(current_shape == shape, name)
-                                    .clicked()
-                                {
-                                    node.shape = shape;
-                                    state.dirty = true;
+                            for &(_, shapes) in TOOLBAR_SHAPES {
+                                for &(shape, name) in shapes {
+                                    if ui
+                                        .selectable_label(current_shape == shape, name)
+                                        .clicked()
+                                    {
+                                        new_shape = Some(shape);
+                                    }
                                 }
                             }
                         });
+                }
+
+                let cur_style = state
+                    .graph
+                    .styles
+                    .get(&node_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut new_style = cur_style.clone();
+                let mut style_changed = false;
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                style_changed |= color_edit_row(ui, "Fill:", &mut new_style.fill);
+                style_changed |= color_edit_row(ui, "Stroke:", &mut new_style.stroke);
+                style_changed |= color_edit_row(ui, "Text:", &mut new_style.color);
+
+                if style_changed {
+                    needs_undo = true;
+                }
+
+                if needs_undo || new_shape.is_some() {
+                    state.push_undo();
+                }
+                let mut changed = false;
+                if let Some(label) = new_label {
+                    if let Some(node) = state.graph.nodes.get_mut(&node_id) {
+                        node.label = label;
+                        changed = true;
+                    }
+                }
+                if let Some(shape) = new_shape {
+                    if let Some(node) = state.graph.nodes.get_mut(&node_id) {
+                        node.shape = shape;
+                        changed = true;
+                    }
+                }
+                if style_changed {
+                    state.graph.styles.insert(node_id.clone(), new_style);
+                    changed = true;
+                }
+                if changed {
+                    state.dirty = true;
+                    state.rebuild_layout();
                 }
             } else if let Some(edge_idx) = state.selected_edge {
                 ui.label(
@@ -576,7 +1318,11 @@ fn render_properties_panel(state: &mut EditorState, ui: &mut egui::Ui) {
                 );
                 ui.add_space(4.0);
 
-                if let Some(edge) = state.graph.edges.get_mut(edge_idx) {
+                let mut new_label: Option<Option<String>> = None;
+                let mut new_type: Option<EdgeType> = None;
+                let mut needs_undo = false;
+
+                if let Some(edge) = state.graph.edges.get(edge_idx) {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Label:")
@@ -590,13 +1336,15 @@ fn render_properties_panel(state: &mut EditorState, ui: &mut egui::Ui) {
                             .desired_width(160.0)
                             .font(egui::FontId::proportional(12.0)),
                     );
+                    if response.gained_focus() {
+                        needs_undo = true;
+                    }
                     if response.changed() {
-                        edge.label = if label.is_empty() {
+                        new_label = Some(if label.is_empty() {
                             None
                         } else {
                             Some(label)
-                        };
-                        state.dirty = true;
+                        });
                     }
 
                     ui.add_space(8.0);
@@ -639,11 +1387,31 @@ fn render_properties_panel(state: &mut EditorState, ui: &mut egui::Ui) {
                                     )
                                     .clicked()
                                 {
-                                    edge.edge_type = t;
-                                    state.dirty = true;
+                                    new_type = Some(t);
                                 }
                             }
                         });
+                }
+
+                if needs_undo || new_type.is_some() {
+                    state.push_undo();
+                }
+                let mut changed = false;
+                if let Some(label) = new_label {
+                    if let Some(edge) = state.graph.edges.get_mut(edge_idx) {
+                        edge.label = label;
+                        changed = true;
+                    }
+                }
+                if let Some(t) = new_type {
+                    if let Some(edge) = state.graph.edges.get_mut(edge_idx) {
+                        edge.edge_type = t;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    state.dirty = true;
+                    state.rebuild_layout();
                 }
             }
         });
@@ -656,8 +1424,39 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         state.selected_edge = None;
     }
 
+    let modifiers = ui.ctx().input(|i| i.modifiers);
+    if modifiers.command && !modifiers.shift && ui.ctx().input(|i| i.key_pressed(egui::Key::Z)) {
+        state.undo();
+    }
+    if modifiers.command && modifiers.shift && ui.ctx().input(|i| i.key_pressed(egui::Key::Z)) {
+        state.redo();
+    }
+    if modifiers.command && ui.ctx().input(|i| i.key_pressed(egui::Key::S)) {
+        if let Some(path) = &state.file_path {
+            let text = serialize_for_path(path, &state.graph);
+            if let Err(e) = std::fs::write(path, &text) {
+                eprintln!("Save error: {e}");
+            } else {
+                state.dirty = false;
+            }
+        }
+    }
+    if modifiers.command && ui.ctx().input(|i| i.key_pressed(egui::Key::N)) {
+        *state = EditorState::new();
+    }
+    if modifiers.command && !modifiers.shift && ui.ctx().input(|i| i.key_pressed(egui::Key::C)) {
+        state.copy_selection();
+    }
+    if modifiers.command && !modifiers.shift && ui.ctx().input(|i| i.key_pressed(egui::Key::V)) {
+        state.paste_clipboard();
+    }
+
     if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
     {
+        let has_selection = !state.selected_nodes.is_empty() || state.selected_edge.is_some();
+        if has_selection {
+            state.push_undo();
+        }
         let to_remove: Vec<String> = state.selected_nodes.drain().collect();
         for id in &to_remove {
             state.graph.nodes.remove(id);
@@ -672,7 +1471,7 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                 state.graph.edges.remove(edge_idx);
             }
         }
-        if !to_remove.is_empty() {
+        if has_selection {
             state.dirty = true;
             state.rebuild_layout();
         }
@@ -681,6 +1480,7 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
     let scene_rect_before = state.scene_rect;
 
     let selected = state.selected_nodes.clone();
+    let selected_edge_idx = state.selected_edge;
     let layout_snap = state.layout_result.clone();
     let is_empty = state.graph.nodes.is_empty();
 
@@ -734,6 +1534,21 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
             if let Some(layout_result) = &layout_snap {
                 renderer::render_diagram(scene_ui, layout_result, &[]);
                 draw_selection_highlights_from(scene_ui, layout_result, &selected);
+
+                if let Some(eidx) = selected_edge_idx {
+                    if let Some(edge) = layout_result.edges.get(eidx) {
+                        let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(70, 130, 200));
+                        for pair in edge.points.windows(2) {
+                            scene_ui.painter().line_segment(
+                                [
+                                    egui::Pos2::new(pair[0][0], pair[0][1]),
+                                    egui::Pos2::new(pair[1][0], pair[1][1]),
+                                ],
+                                stroke,
+                            );
+                        }
+                    }
+                }
 
                 if let Some((sx, sy)) = connecting_source {
                     for node in &layout_result.nodes {
@@ -830,8 +1645,8 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
             let scene_delta_x = drag_delta.x / zoom;
             let scene_delta_y = drag_delta.y / zoom;
             if let Some(pos) = state.manual_positions.get_mut(node_id) {
-                pos.0 += scene_delta_x;
-                pos.1 += scene_delta_y;
+                let snapped = snap_to_grid(pos.0 + scene_delta_x, pos.1 + scene_delta_y);
+                *pos = snapped;
                 state.dirty = true;
                 state.rebuild_layout();
             }
@@ -888,6 +1703,9 @@ fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2) {
                 state.selected_nodes.insert(node_id.clone());
                 state.selected_edge = None;
                 state.interaction = InteractionState::DraggingNode { node_id };
+            } else if let Some(edge_idx) = state.edge_at_scene_pos(scene_pos) {
+                state.selected_nodes.clear();
+                state.selected_edge = Some(edge_idx);
             } else {
                 state.selected_nodes.clear();
                 state.selected_edge = None;
@@ -896,9 +1714,39 @@ fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2) {
     }
 }
 
+const GRID_SPACING: f32 = 50.0;
+
+fn snap_to_grid(x: f32, y: f32) -> (f32, f32) {
+    (
+        (x / GRID_SPACING).round() * GRID_SPACING,
+        (y / GRID_SPACING).round() * GRID_SPACING,
+    )
+}
+
+fn point_to_segment_distance(
+    px: f32,
+    py: f32,
+    ax: f32,
+    ay: f32,
+    bx: f32,
+    by: f32,
+) -> f32 {
+    let dx = bx - ax;
+    let dy = by - ay;
+    let len_sq = dx * dx + dy * dy;
+    if len_sq < 1e-6 {
+        return ((px - ax).powi(2) + (py - ay).powi(2)).sqrt();
+    }
+    let t = ((px - ax) * dx + (py - ay) * dy) / len_sq;
+    let t = t.clamp(0.0, 1.0);
+    let closest_x = ax + t * dx;
+    let closest_y = ay + t * dy;
+    ((px - closest_x).powi(2) + (py - closest_y).powi(2)).sqrt()
+}
+
 fn draw_grid(ui: &mut egui::Ui) {
     let clip = ui.clip_rect();
-    let grid_spacing = 50.0;
+    let grid_spacing = GRID_SPACING;
     let grid_color = egui::Color32::from_rgb(235, 235, 235);
     let stroke = egui::Stroke::new(0.5, grid_color);
 

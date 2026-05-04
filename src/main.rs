@@ -625,15 +625,22 @@ impl eframe::App for BoxcrabApp {
                 }
             }
             AppMode::Editor(e) => {
-                if let editor::EditorAction::OpenFile(path, fmt) =
-                    editor::render_editor_ui(e, ui)
-                {
-                    self.mode = AppMode::Viewer(ViewerState::new(
-                        path,
-                        fmt,
-                        0,
-                        ui.ctx(),
-                    ));
+                match editor::render_editor_ui(e, ui) {
+                    editor::EditorAction::OpenFile(path, fmt) => {
+                        self.mode = AppMode::Viewer(ViewerState::new(
+                            path,
+                            fmt,
+                            0,
+                            ui.ctx(),
+                        ));
+                    }
+                    editor::EditorAction::EditFile(path, fmt) => {
+                        match editor::EditorState::from_file(path, fmt) {
+                            Ok(new_state) => *e = new_state,
+                            Err(err) => eprintln!("Failed to open file: {err}"),
+                        }
+                    }
+                    editor::EditorAction::None => {}
                 }
             }
         }
