@@ -110,6 +110,11 @@ pub fn render_diagram(ui: &mut Ui, layout: &LayoutResult, drillable_ids: &[Strin
             NodeShape::Callout => shapes::draw_callout(painter, rect, fill, stroke),
             NodeShape::StoredData => shapes::draw_stored_data(painter, rect, fill, stroke),
             NodeShape::Text => shapes::draw_text_shape(painter, rect, fill, stroke),
+            NodeShape::Stadium => shapes::draw_stadium(painter, rect, fill, stroke),
+            NodeShape::Subroutine => shapes::draw_subroutine(painter, rect, fill, stroke),
+            NodeShape::DoubleCircle => shapes::draw_double_circle(painter, rect, fill, stroke),
+            NodeShape::Trapezoid => shapes::draw_trapezoid(painter, rect, fill, stroke),
+            NodeShape::TrapezoidAlt => shapes::draw_trapezoid_alt(painter, rect, fill, stroke),
             NodeShape::Class => {
                 shapes::draw_class_shape(
                     painter, rect, fill, stroke, &node.label,

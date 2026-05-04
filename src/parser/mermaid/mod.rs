@@ -1,3 +1,7 @@
+mod class_diagram;
+mod state_diagram;
+mod er_diagram;
+
 use crate::diagram::*;
 use pest::Parser;
 use pest_derive::Parser;
@@ -8,6 +12,17 @@ use std::collections::HashMap;
 struct MermaidParser;
 
 pub fn parse(input: &str) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
+    let trimmed = input.trim();
+    if trimmed.starts_with("classDiagram") {
+        return class_diagram::parse(input);
+    }
+    if trimmed.starts_with("stateDiagram") {
+        return state_diagram::parse(input);
+    }
+    if trimmed.starts_with("erDiagram") {
+        return er_diagram::parse(input);
+    }
+
     let pairs = MermaidParser::parse(Rule::diagram, input)?;
 
     let mut graph = DiagramGraph {
@@ -135,6 +150,78 @@ fn parse_node_ref(
                 shape = Some(NodeShape::Flag);
                 for inner in p.into_inner() {
                     if inner.as_rule() == Rule::shape_text_bracket {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::stadium_shape => {
+                shape = Some(NodeShape::Stadium);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_bracket {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::subroutine_shape => {
+                shape = Some(NodeShape::Subroutine);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_bracket {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::cylinder_db_shape => {
+                shape = Some(NodeShape::Cylinder);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_paren {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::double_circle_shape => {
+                shape = Some(NodeShape::DoubleCircle);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_paren {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::hexagon_shape => {
+                shape = Some(NodeShape::Hexagon);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_brace {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::parallelogram_shape => {
+                shape = Some(NodeShape::Parallelogram);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_parallelogram {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::parallelogram_alt_shape => {
+                shape = Some(NodeShape::Parallelogram);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_parallelogram_alt {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::trapezoid_shape => {
+                shape = Some(NodeShape::Trapezoid);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_trapezoid {
+                        label = Some(inner.as_str().trim().to_string());
+                    }
+                }
+            }
+            Rule::trapezoid_alt_shape => {
+                shape = Some(NodeShape::TrapezoidAlt);
+                for inner in p.into_inner() {
+                    if inner.as_rule() == Rule::shape_text_trapezoid_alt {
                         label = Some(inner.as_str().trim().to_string());
                     }
                 }

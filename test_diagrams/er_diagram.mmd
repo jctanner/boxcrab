@@ -1,0 +1,24 @@
+erDiagram
+    CUSTOMER {
+        int id PK
+        string name
+        string email
+    }
+    ORDER {
+        int id PK
+        date created
+        string status
+    }
+    LINE_ITEM {
+        int id PK
+        int quantity
+        float price
+    }
+    PRODUCT {
+        int id PK
+        string name
+        float unitPrice
+    }
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE_ITEM : contains
+    LINE_ITEM }|--|| PRODUCT : references

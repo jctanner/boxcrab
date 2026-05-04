@@ -441,6 +441,88 @@ fn draw_node(pixmap: &mut Pixmap, node: &LayoutNode, transform: Transform, font:
                 text_rgb, font, transform, stroke_rgb,
             );
         }
+        NodeShape::Stadium => {
+            let r = node.height / 2.0;
+            let body_left = x + r;
+            let body_right = x + node.width - r;
+            let cy = node.y;
+            let n = 16;
+            let mut pb = PathBuilder::new();
+            for i in 0..=n {
+                let angle = std::f32::consts::PI / 2.0 + std::f32::consts::PI * i as f32 / n as f32;
+                let px = body_left + r * angle.cos();
+                let py = cy + r * angle.sin();
+                if i == 0 { pb.move_to(px, py); } else { pb.line_to(px, py); }
+            }
+            for i in 0..=n {
+                let angle = -std::f32::consts::PI / 2.0 + std::f32::consts::PI * i as f32 / n as f32;
+                let px = body_right + r * angle.cos();
+                let py = cy + r * angle.sin();
+                pb.line_to(px, py);
+            }
+            pb.close();
+            if let Some(path) = pb.finish() {
+                pixmap.fill_path(&path, &fill_paint, FillRule::Winding, transform, None);
+                pixmap.stroke_path(&path, &stroke_paint, &stroke_from(stroke_width), transform, None);
+            }
+        }
+        NodeShape::Subroutine => {
+            if let Some(rect) = Rect::from_xywh(x, y, node.width, node.height) {
+                pixmap.fill_rect(rect, &fill_paint, transform, None);
+                let path = PathBuilder::from_rect(rect);
+                pixmap.stroke_path(&path, &stroke_paint, &stroke_from(stroke_width), transform, None);
+            }
+            let inset = 8.0f32.min(node.width * 0.08);
+            let mut pb = PathBuilder::new();
+            pb.move_to(x + inset, y);
+            pb.line_to(x + inset, y + node.height);
+            pb.move_to(x + node.width - inset, y);
+            pb.line_to(x + node.width - inset, y + node.height);
+            if let Some(path) = pb.finish() {
+                pixmap.stroke_path(&path, &stroke_paint, &stroke_from(stroke_width), transform, None);
+            }
+        }
+        NodeShape::DoubleCircle => {
+            let outer_r = node.width.min(node.height) / 2.0;
+            let inner_r = (outer_r - 6.0).max(2.0);
+            let mut pb = PathBuilder::new();
+            pb.push_circle(node.x, node.y, outer_r);
+            if let Some(path) = pb.finish() {
+                pixmap.fill_path(&path, &fill_paint, FillRule::Winding, transform, None);
+                pixmap.stroke_path(&path, &stroke_paint, &stroke_from(stroke_width), transform, None);
+            }
+            let mut pb2 = PathBuilder::new();
+            pb2.push_circle(node.x, node.y, inner_r);
+            if let Some(path) = pb2.finish() {
+                pixmap.stroke_path(&path, &stroke_paint, &stroke_from(stroke_width), transform, None);
+            }
+        }
+        NodeShape::Trapezoid => {
+            let inset = node.width * 0.15;
+            let mut pb = PathBuilder::new();
+            pb.move_to(x, y);
+            pb.line_to(x + node.width, y);
+            pb.line_to(x + node.width - inset, y + node.height);
+            pb.line_to(x + inset, y + node.height);
+            pb.close();
+            if let Some(path) = pb.finish() {
+                pixmap.fill_path(&path, &fill_paint, FillRule::Winding, transform, None);
+                pixmap.stroke_path(&path, &stroke_paint, &stroke_from(stroke_width), transform, None);
+            }
+        }
+        NodeShape::TrapezoidAlt => {
+            let inset = node.width * 0.15;
+            let mut pb = PathBuilder::new();
+            pb.move_to(x + inset, y);
+            pb.line_to(x + node.width - inset, y);
+            pb.line_to(x + node.width, y + node.height);
+            pb.line_to(x, y + node.height);
+            pb.close();
+            if let Some(path) = pb.finish() {
+                pixmap.fill_path(&path, &fill_paint, FillRule::Winding, transform, None);
+                pixmap.stroke_path(&path, &stroke_paint, &stroke_from(stroke_width), transform, None);
+            }
+        }
     }
 
     if node.style.three_d == Some(true) {

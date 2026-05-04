@@ -1,0 +1,14 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Processing : submit
+    Processing --> Validating : validate
+    Validating --> Processing : retry
+    Validating --> Approved : pass
+    Validating --> Rejected : fail
+    Approved --> [*]
+    Rejected --> Idle : resubmit
+    Idle : Waiting for input
+    Processing : Running checks
+    Validating : Verifying data
+    Approved : Request approved
+    Rejected : Request denied

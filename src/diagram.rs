@@ -32,6 +32,11 @@ pub enum NodeShape {
     Text,
     Class,
     SqlTable,
+    Stadium,
+    Subroutine,
+    DoubleCircle,
+    Trapezoid,
+    TrapezoidAlt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

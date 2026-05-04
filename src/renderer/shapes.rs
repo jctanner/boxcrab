@@ -843,3 +843,64 @@ pub fn draw_dashed_line(
         cursor += segment;
     }
 }
+
+pub fn draw_stadium(painter: &Painter, rect: Rect, fill: Color32, stroke: Stroke) {
+    let r = rect.height() / 2.0;
+    let body_left = rect.left() + r;
+    let body_right = rect.right() - r;
+    let cy = rect.center().y;
+    let mut pts = Vec::new();
+    let n = 16;
+    for i in 0..=n {
+        let angle = std::f32::consts::PI / 2.0 + std::f32::consts::PI * i as f32 / n as f32;
+        pts.push(Pos2::new(body_left + r * angle.cos(), cy + r * angle.sin()));
+    }
+    for i in 0..=n {
+        let angle = -std::f32::consts::PI / 2.0 + std::f32::consts::PI * i as f32 / n as f32;
+        pts.push(Pos2::new(body_right + r * angle.cos(), cy + r * angle.sin()));
+    }
+    painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+}
+
+pub fn draw_subroutine(painter: &Painter, rect: Rect, fill: Color32, stroke: Stroke) {
+    painter.rect(rect, 0.0, fill, stroke, StrokeKind::Outside);
+    let inset = 8.0f32.min(rect.width() * 0.08);
+    painter.line_segment(
+        [Pos2::new(rect.left() + inset, rect.top()), Pos2::new(rect.left() + inset, rect.bottom())],
+        stroke,
+    );
+    painter.line_segment(
+        [Pos2::new(rect.right() - inset, rect.top()), Pos2::new(rect.right() - inset, rect.bottom())],
+        stroke,
+    );
+}
+
+pub fn draw_double_circle(painter: &Painter, rect: Rect, fill: Color32, stroke: Stroke) {
+    let outer_r = rect.width().min(rect.height()) / 2.0;
+    let inner_r = outer_r - 6.0;
+    let center = rect.center();
+    painter.circle(center, outer_r, fill, stroke);
+    painter.circle_stroke(center, inner_r.max(2.0), stroke);
+}
+
+pub fn draw_trapezoid(painter: &Painter, rect: Rect, fill: Color32, stroke: Stroke) {
+    let inset = rect.width() * 0.15;
+    let pts = vec![
+        Pos2::new(rect.left(), rect.top()),
+        Pos2::new(rect.right(), rect.top()),
+        Pos2::new(rect.right() - inset, rect.bottom()),
+        Pos2::new(rect.left() + inset, rect.bottom()),
+    ];
+    painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+}
+
+pub fn draw_trapezoid_alt(painter: &Painter, rect: Rect, fill: Color32, stroke: Stroke) {
+    let inset = rect.width() * 0.15;
+    let pts = vec![
+        Pos2::new(rect.left() + inset, rect.top()),
+        Pos2::new(rect.right() - inset, rect.top()),
+        Pos2::new(rect.right(), rect.bottom()),
+        Pos2::new(rect.left(), rect.bottom()),
+    ];
+    painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+}

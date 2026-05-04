@@ -18,9 +18,26 @@ node_stmt = { node_ref }
 node_ref = { node_id ~ node_shape? }
 node_id = @{ (ASCII_ALPHANUMERIC | "_")+ }
 
-node_shape = _{ circle_shape | rounded_shape | rect_shape | diamond_shape | flag_shape }
+node_shape = _{
+    double_circle_shape | circle_shape |
+    stadium_shape | cylinder_db_shape | rounded_shape |
+    subroutine_shape |
+    trapezoid_shape | trapezoid_alt_shape |
+    parallelogram_shape | parallelogram_alt_shape |
+    hexagon_shape |
+    rect_shape | diamond_shape | flag_shape
+}
+double_circle_shape = { "(((" ~ shape_text_paren ~ ")))" }
 circle_shape = { "((" ~ shape_text_paren ~ "))" }
+stadium_shape = { "([" ~ shape_text_bracket ~ "])" }
+cylinder_db_shape = { "[(" ~ shape_text_paren ~ ")]" }
 rounded_shape = { "(" ~ shape_text_paren ~ ")" }
+subroutine_shape = { "[[" ~ shape_text_bracket ~ "]]" }
+trapezoid_shape = { "[/" ~ shape_text_trapezoid ~ "\\]" }
+trapezoid_alt_shape = { "[\\" ~ shape_text_trapezoid_alt ~ "/]" }
+parallelogram_shape = { "[/" ~ shape_text_parallelogram ~ "/]" }
+parallelogram_alt_shape = { "[\\" ~ shape_text_parallelogram_alt ~ "\\]" }
+hexagon_shape = { "{{" ~ shape_text_brace ~ "}}" }
 rect_shape = { "[" ~ shape_text_bracket ~ "]" }
 diamond_shape = { "{" ~ shape_text_brace ~ "}" }
 flag_shape = { ">" ~ shape_text_bracket ~ "]" }
@@ -28,6 +45,10 @@ flag_shape = { ">" ~ shape_text_bracket ~ "]" }
 shape_text_bracket = @{ ("\"" ~ (!"\"" ~ !NEWLINE ~ ANY)* ~ "\"" | (!"}" ~ !"]" ~ !NEWLINE ~ ANY)+) }
 shape_text_paren = @{ ("\"" ~ (!"\"" ~ !NEWLINE ~ ANY)* ~ "\"" | (!"))" ~ !")" ~ !NEWLINE ~ ANY)+) }
 shape_text_brace = @{ ("\"" ~ (!"\"" ~ !NEWLINE ~ ANY)* ~ "\"" | (!"}" ~ !NEWLINE ~ ANY)+) }
+shape_text_trapezoid = @{ (!"\\]" ~ !NEWLINE ~ ANY)+ }
+shape_text_trapezoid_alt = @{ (!"/]" ~ !NEWLINE ~ ANY)+ }
+shape_text_parallelogram = @{ (!"/]" ~ !NEWLINE ~ ANY)+ }
+shape_text_parallelogram_alt = @{ (!"\\]" ~ !NEWLINE ~ ANY)+ }
 
 // Edges / links
 link_stmt = { node_ref_group ~ (edge ~ node_ref_group)+ }

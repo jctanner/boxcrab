@@ -1,0 +1,26 @@
+classDiagram
+    class Animal {
+        +String name
+        +int age
+        +makeSound()
+        +move()
+    }
+    class Dog {
+        +String breed
+        +fetch()
+        +bark()
+    }
+    class Cat {
+        +bool indoor
+        +purr()
+        +scratch()
+    }
+    class Shelter {
+        +String location
+        +int capacity
+        +addAnimal(Animal)
+        +removeAnimal(Animal)
+    }
+    Animal <|-- Dog
+    Animal <|-- Cat
+    Shelter o-- Animal : houses

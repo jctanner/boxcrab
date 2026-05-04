@@ -677,12 +677,15 @@ fn intersect_node(
         | NodeShape::Page | NodeShape::Document | NodeShape::Package
         | NodeShape::Parallelogram | NodeShape::Step | NodeShape::Callout
         | NodeShape::StoredData | NodeShape::Queue | NodeShape::Text
-        | NodeShape::Class | NodeShape::SqlTable => {
+        | NodeShape::Class | NodeShape::SqlTable
+        | NodeShape::Stadium | NodeShape::Subroutine
+        | NodeShape::Trapezoid | NodeShape::TrapezoidAlt => {
             intersect_rect(cx, cy, w, h, px, py)
         }
         NodeShape::Diamond => intersect_diamond(cx, cy, w, h, px, py),
         NodeShape::Circle | NodeShape::Oval | NodeShape::Cloud
-        | NodeShape::Cylinder | NodeShape::Person => {
+        | NodeShape::Cylinder | NodeShape::Person
+        | NodeShape::DoubleCircle => {
             intersect_circle(cx, cy, w, h, px, py)
         }
         NodeShape::Hexagon => {
