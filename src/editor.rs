@@ -455,6 +455,9 @@ const TOOLBAR_SHAPES: &[(&str, &[(NodeShape, &str)])] = &[
 ];
 
 pub fn render_editor_ui(state: &mut EditorState, ui: &mut egui::Ui) -> EditorAction {
+    ui.painter()
+        .rect_filled(ui.max_rect(), 0.0, egui::Color32::WHITE);
+
     let action = render_editor_menu(state, ui);
 
     let measured = renderer::measure_node_texts(ui, &Some(state.graph.clone()));
@@ -721,7 +724,7 @@ fn text_tool_button(ui: &mut egui::Ui, label: &str, is_active: bool) -> egui::Re
                 egui::Color32::from_rgb(40, 40, 40)
             }),
     )
-    .min_size(egui::Vec2::new(72.0, 24.0))
+    .min_size(egui::Vec2::new(62.0, 24.0))
     .fill(if is_active {
         egui::Color32::from_rgb(70, 130, 200)
     } else {
@@ -744,7 +747,7 @@ fn shape_icon_button(
     name: &str,
     is_active: bool,
 ) -> egui::Response {
-    let size = egui::Vec2::new(34.0, 28.0);
+    let size = egui::Vec2::new(26.0, 21.0);
     let fill = if is_active {
         egui::Color32::from_rgb(70, 130, 200)
     } else {
@@ -771,8 +774,8 @@ fn shape_icon_button(
             egui::Stroke::new(1.0, stroke_color),
             egui::StrokeKind::Outside,
         );
-        let icon_stroke = egui::Stroke::new(1.5, icon_color);
-        draw_shape_icon(ui.painter(), rect.shrink(5.0), shape, icon_stroke, icon_color);
+        let icon_stroke = egui::Stroke::new(1.2, icon_color);
+        draw_shape_icon(ui.painter(), rect.shrink(4.0), shape, icon_stroke, icon_color);
     }
     response.on_hover_text(name)
 }
@@ -1088,15 +1091,12 @@ fn draw_shape_icon(
 fn render_toolbar(state: &mut EditorState, ui: &mut egui::Ui) {
     egui::Panel::left("editor_toolbar")
         .resizable(false)
-        .exact_size(84.0)
+        .show_separator_line(false)
+        .exact_size(72.0)
         .frame(
             egui::Frame::new()
                 .fill(egui::Color32::from_rgb(240, 240, 240))
-                .inner_margin(4.0)
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgb(200, 200, 200),
-                )),
+                .inner_margin(4.0),
         )
         .show_inside(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1418,6 +1418,10 @@ fn render_properties_panel(state: &mut EditorState, ui: &mut egui::Ui) {
 }
 
 fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
+    let canvas_rect = ui.available_rect_before_wrap();
+    ui.painter()
+        .rect_filled(canvas_rect, 0.0, egui::Color32::WHITE);
+
     if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         state.interaction = InteractionState::Idle;
         state.selected_nodes.clear();
