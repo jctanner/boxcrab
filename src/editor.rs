@@ -1483,7 +1483,11 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         state.paste_clipboard();
     }
 
-    if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+    let text_editing = ui.ctx().memory(|m| m.focused().is_some());
+    if !text_editing
+        && ui
+            .ctx()
+            .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
     {
         let has_selection = !state.selected_nodes.is_empty() || state.selected_edge.is_some();
         if has_selection {
