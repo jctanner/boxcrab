@@ -901,6 +901,59 @@ fn build_edges_with_port_spreading(
     layout_edges
 }
 
+pub fn route_edges_manual(
+    edge_defs: &[crate::diagram::EdgeDef],
+    nodes: &[LayoutNode],
+) -> Vec<LayoutEdge> {
+    let positions: HashMap<String, (f32, f32)> = nodes
+        .iter()
+        .map(|n| (n.id.clone(), (n.x, n.y)))
+        .collect();
+    let sizes: HashMap<String, (f32, f32)> = nodes
+        .iter()
+        .map(|n| (n.id.clone(), (n.width, n.height)))
+        .collect();
+    let shapes: HashMap<String, NodeShape> = nodes
+        .iter()
+        .map(|n| (n.id.clone(), n.shape))
+        .collect();
+
+    let mut edges = Vec::new();
+    for ed in edge_defs {
+        let from_pos = match positions.get(&ed.from) {
+            Some(p) => *p,
+            None => continue,
+        };
+        let to_pos = match positions.get(&ed.to) {
+            Some(p) => *p,
+            None => continue,
+        };
+        let (fw, fh) = sizes.get(&ed.from).copied().unwrap_or((120.0, 40.0));
+        let (tw, th) = sizes.get(&ed.to).copied().unwrap_or((120.0, 40.0));
+        let fs = shapes.get(&ed.from).copied().unwrap_or(NodeShape::Rect);
+        let ts = shapes.get(&ed.to).copied().unwrap_or(NodeShape::Rect);
+
+        let start = intersect_node(from_pos.0, from_pos.1, fw, fh, fs, to_pos.0, to_pos.1);
+        let end = intersect_node(to_pos.0, to_pos.1, tw, th, ts, from_pos.0, from_pos.1);
+
+        let mid = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0];
+        let label_pos = ed.label.as_ref().map(|_| mid);
+
+        edges.push(LayoutEdge {
+            points: vec![start, end],
+            control_points: None,
+            edge_type: ed.edge_type,
+            label: ed.label.clone(),
+            label_pos,
+            reversed: false,
+            src_arrowhead: ed.src_arrowhead,
+            dst_arrowhead: ed.dst_arrowhead,
+            style: ed.style.clone(),
+        });
+    }
+    edges
+}
+
 fn compute_bezier_control_points(
     start: [f32; 2],
     end: [f32; 2],
