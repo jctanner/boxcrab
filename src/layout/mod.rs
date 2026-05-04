@@ -1,6 +1,6 @@
 mod sugiyama;
 
-use crate::diagram::{DiagramGraph, Direction, EdgeType, NodeShape, StyleProps};
+use crate::diagram::{ArrowheadType, ClassField, ClassMethod, DiagramGraph, Direction, EdgeType, NearPosition, NodeShape, SqlColumn, StyleProps};
 use std::collections::HashMap;
 use sugiyama::SimpleEdge;
 
@@ -14,6 +14,11 @@ pub struct LayoutNode {
     pub label: String,
     pub shape: NodeShape,
     pub style: StyleProps,
+    pub class_fields: Vec<ClassField>,
+    pub class_methods: Vec<ClassMethod>,
+    pub sql_columns: Vec<SqlColumn>,
+    pub tooltip: Option<String>,
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +29,9 @@ pub struct LayoutEdge {
     pub label: Option<String>,
     pub label_pos: Option<[f32; 2]>,
     pub reversed: bool,
+    pub src_arrowhead: Option<ArrowheadType>,
+    pub dst_arrowhead: Option<ArrowheadType>,
+    pub style: StyleProps,
 }
 
 #[derive(Debug, Clone)]
@@ -210,16 +218,28 @@ pub fn compute_layout(
             &graph.subgraphs,
         );
 
-        let sub_layout = sugiyama::layout_nodes_grouped(
-            &level_ids,
-            &level_sizes,
-            &level_edges,
-            graph.direction,
-            None,
-        );
+        let sg_def = &graph.subgraphs[sg_idx];
+        let is_grid = sg_def.grid_rows.is_some() || sg_def.grid_columns.is_some();
+
+        let sub_layout = if is_grid {
+            layout_grid(
+                &level_ids,
+                &level_sizes,
+                sg_def.grid_rows,
+                sg_def.grid_columns,
+                sg_def.grid_gap.unwrap_or(20.0),
+            )
+        } else {
+            sugiyama::layout_nodes_grouped(
+                &level_ids,
+                &level_sizes,
+                &level_edges,
+                graph.direction,
+                None,
+            )
+        };
 
         let cid = compound_id(sg_idx);
-        // Compute bounding box of this subgraph's internal layout
         let mut max_x = 0.0f32;
         let mut max_y = 0.0f32;
         for id in &level_ids {
@@ -387,6 +407,11 @@ pub fn compute_layout(
                 label: node.label.clone(),
                 shape: node.shape,
                 style,
+                class_fields: node.class_fields.clone(),
+                class_methods: node.class_methods.clone(),
+                sql_columns: node.sql_columns.clone(),
+                tooltip: node.tooltip.clone(),
+                link: node.link.clone(),
             });
         }
     }
@@ -418,6 +443,24 @@ pub fn compute_layout(
     for sg in &subgraph_boxes {
         total_width = total_width.max(sg.x + sg.width + 50.0);
         total_height = total_height.max(sg.y + sg.height + 50.0);
+    }
+
+    let margin = 20.0;
+    for node in &mut layout_nodes {
+        if let Some(near) = graph.nodes.get(&node.id).and_then(|n| n.near) {
+            let (x, y) = match near {
+                NearPosition::TopLeft => (margin + node.width / 2.0, margin + node.height / 2.0),
+                NearPosition::TopCenter => (total_width / 2.0, margin + node.height / 2.0),
+                NearPosition::TopRight => (total_width - margin - node.width / 2.0, margin + node.height / 2.0),
+                NearPosition::CenterLeft => (margin + node.width / 2.0, total_height / 2.0),
+                NearPosition::CenterRight => (total_width - margin - node.width / 2.0, total_height / 2.0),
+                NearPosition::BottomLeft => (margin + node.width / 2.0, total_height - margin - node.height / 2.0),
+                NearPosition::BottomCenter => (total_width / 2.0, total_height - margin - node.height / 2.0),
+                NearPosition::BottomRight => (total_width - margin - node.width / 2.0, total_height - margin - node.height / 2.0),
+            };
+            node.x = x;
+            node.y = y;
+        }
     }
 
     Ok(LayoutResult {
@@ -466,6 +509,54 @@ fn collect_level_edges(
     edges
 }
 
+fn layout_grid(
+    ids: &[String],
+    sizes: &HashMap<String, (f32, f32)>,
+    grid_rows: Option<usize>,
+    grid_columns: Option<usize>,
+    gap: f32,
+) -> sugiyama::SubgraphLayout {
+    let n = ids.len();
+    if n == 0 {
+        return sugiyama::SubgraphLayout {
+            positions: HashMap::new(),
+            edge_waypoints: HashMap::new(),
+        };
+    }
+
+    let cols = if let Some(c) = grid_columns {
+        c.max(1)
+    } else if let Some(r) = grid_rows {
+        ((n + r - 1) / r).max(1)
+    } else {
+        (n as f32).sqrt().ceil() as usize
+    };
+
+    let rows = (n + cols - 1) / cols;
+
+    let mut col_widths = vec![0.0f32; cols];
+    let mut row_heights = vec![0.0f32; rows];
+
+    for (idx, id) in ids.iter().enumerate() {
+        let r = idx / cols;
+        let c = idx % cols;
+        let (w, h) = sizes.get(id).copied().unwrap_or((DEFAULT_NODE_WIDTH, DEFAULT_NODE_HEIGHT));
+        col_widths[c] = col_widths[c].max(w);
+        row_heights[r] = row_heights[r].max(h);
+    }
+
+    let mut positions = HashMap::new();
+    for (idx, id) in ids.iter().enumerate() {
+        let r = idx / cols;
+        let c = idx % cols;
+        let x: f32 = col_widths[..c].iter().sum::<f32>() + c as f32 * gap + col_widths[c] / 2.0;
+        let y: f32 = row_heights[..r].iter().sum::<f32>() + r as f32 * gap + row_heights[r] / 2.0;
+        positions.insert(id.clone(), (x, y));
+    }
+
+    sugiyama::SubgraphLayout { positions, edge_waypoints: HashMap::new() }
+}
+
 fn compute_node_sizes(
     graph: &DiagramGraph,
     measured_sizes: Option<&HashMap<String, egui::Vec2>>,
@@ -491,6 +582,32 @@ fn compute_node_sizes(
             NodeShape::Circle => {
                 let d = w.max(h);
                 (d, d)
+            }
+            NodeShape::Class => {
+                let row_h = 18.0;
+                let header_h = h.max(30.0);
+                let fields_h = node.class_fields.len() as f32 * row_h;
+                let methods_h = node.class_methods.len() as f32 * row_h;
+                let total_h = header_h + fields_h + methods_h + 8.0;
+                let max_field_w = node.class_fields.iter()
+                    .map(|f| (f.name.len() + f.type_str.len() + 4) as f32 * 8.0)
+                    .fold(0.0f32, f32::max);
+                let max_method_w = node.class_methods.iter()
+                    .map(|m| (m.name.len() + m.return_type.len() + 4) as f32 * 8.0)
+                    .fold(0.0f32, f32::max);
+                let total_w = w.max(max_field_w + NODE_PADDING_H).max(max_method_w + NODE_PADDING_H);
+                (total_w, total_h)
+            }
+            NodeShape::SqlTable => {
+                let row_h = 18.0;
+                let header_h = h.max(30.0);
+                let cols_h = node.sql_columns.len() as f32 * row_h;
+                let total_h = header_h + cols_h + 8.0;
+                let max_col_w = node.sql_columns.iter()
+                    .map(|c| (c.name.len() + c.type_str.len() + c.constraint.len() + 6) as f32 * 8.0)
+                    .fold(0.0f32, f32::max);
+                let total_w = w.max(max_col_w + NODE_PADDING_H);
+                (total_w, total_h)
             }
             _ => (w, h),
         };
@@ -556,11 +673,21 @@ fn intersect_node(
     px: f32, py: f32,
 ) -> [f32; 2] {
     match shape {
-        NodeShape::Rect | NodeShape::Rounded | NodeShape::Flag => {
+        NodeShape::Rect | NodeShape::Rounded | NodeShape::Flag
+        | NodeShape::Page | NodeShape::Document | NodeShape::Package
+        | NodeShape::Parallelogram | NodeShape::Step | NodeShape::Callout
+        | NodeShape::StoredData | NodeShape::Queue | NodeShape::Text
+        | NodeShape::Class | NodeShape::SqlTable => {
             intersect_rect(cx, cy, w, h, px, py)
         }
         NodeShape::Diamond => intersect_diamond(cx, cy, w, h, px, py),
-        NodeShape::Circle => intersect_circle(cx, cy, w, h, px, py),
+        NodeShape::Circle | NodeShape::Oval | NodeShape::Cloud
+        | NodeShape::Cylinder | NodeShape::Person => {
+            intersect_circle(cx, cy, w, h, px, py)
+        }
+        NodeShape::Hexagon => {
+            intersect_rect(cx, cy, w * 0.85, h, px, py)
+        }
     }
 }
 
@@ -723,6 +850,9 @@ fn build_edges_with_port_spreading(
                 label: ed.label.clone(),
                 label_pos,
                 reversed: info.reversed,
+                src_arrowhead: ed.src_arrowhead,
+                dst_arrowhead: ed.dst_arrowhead,
+                style: ed.style.clone(),
             });
         } else {
             let cp = compute_bezier_control_points(start, end, direction);
@@ -736,6 +866,9 @@ fn build_edges_with_port_spreading(
                 label: ed.label.clone(),
                 label_pos,
                 reversed: info.reversed,
+                src_arrowhead: ed.src_arrowhead,
+                dst_arrowhead: ed.dst_arrowhead,
+                style: ed.style.clone(),
             });
         }
     }
@@ -850,6 +983,42 @@ fn merge_style(target: &mut StyleProps, source: &StyleProps) {
     }
     if source.color.is_some() {
         target.color = source.color;
+    }
+    if source.border_radius.is_some() {
+        target.border_radius = source.border_radius;
+    }
+    if source.opacity.is_some() {
+        target.opacity = source.opacity;
+    }
+    if source.stroke_dash.is_some() {
+        target.stroke_dash = source.stroke_dash;
+    }
+    if source.shadow.is_some() {
+        target.shadow = source.shadow;
+    }
+    if source.three_d.is_some() {
+        target.three_d = source.three_d;
+    }
+    if source.multiple.is_some() {
+        target.multiple = source.multiple;
+    }
+    if source.double_border.is_some() {
+        target.double_border = source.double_border;
+    }
+    if source.font_size.is_some() {
+        target.font_size = source.font_size;
+    }
+    if source.bold.is_some() {
+        target.bold = source.bold;
+    }
+    if source.italic.is_some() {
+        target.italic = source.italic;
+    }
+    if source.fill_pattern.is_some() {
+        target.fill_pattern = source.fill_pattern;
+    }
+    if source.animated.is_some() {
+        target.animated = source.animated;
     }
 }
 

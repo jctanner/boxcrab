@@ -1206,6 +1206,12 @@ pub fn to_diagram_graph(
                 label,
                 shape,
                 classes: elem.tags.clone(),
+                class_fields: Vec::new(),
+                class_methods: Vec::new(),
+                sql_columns: Vec::new(),
+                near: None,
+                tooltip: None,
+                link: None,
             };
             nodes.insert(id.clone(), node_def);
 
@@ -1225,6 +1231,9 @@ pub fn to_diagram_graph(
             to: tgt.clone(),
             edge_type: EdgeType::DottedArrow,
             label: build_edge_label(desc, tech),
+            src_arrowhead: None,
+            dst_arrowhead: None,
+            style: StyleProps::default(),
         })
         .collect();
 
@@ -1248,6 +1257,9 @@ pub fn to_diagram_graph(
             vec![SubgraphDef {
                 title: boundary_title,
                 node_ids: child_ids,
+                grid_rows: None,
+                grid_columns: None,
+                grid_gap: None,
             }]
         }
     } else {

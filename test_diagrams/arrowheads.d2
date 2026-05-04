@@ -1,0 +1,35 @@
+# D2 arrowhead variants test
+
+a: Source
+b: Target
+a -> b: default arrow
+
+c: Diamond Start
+d: Diamond End
+c -> d: {
+  label: diamond arrowhead
+  target-arrowhead: {
+    shape: diamond
+  }
+}
+
+e: Circle
+f: Filled Circle
+e -> f: {
+  label: circle arrowhead
+  target-arrowhead: {
+    shape: circle
+  }
+}
+
+g: CF Many
+h: CF One
+g -> h: {
+  label: crow's foot
+  source-arrowhead: {
+    shape: cf-many
+  }
+  target-arrowhead: {
+    shape: cf-one
+  }
+}

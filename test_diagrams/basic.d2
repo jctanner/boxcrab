@@ -1,0 +1,44 @@
+# Basic D2 diagram with various shapes and connections
+
+direction: right
+
+user: User {
+  shape: person
+}
+
+web: Web Server {
+  shape: rectangle
+}
+
+api: API Gateway {
+  shape: hexagon
+}
+
+db: Database {
+  shape: cylinder
+}
+
+cache: Cache {
+  shape: queue
+}
+
+cloud_svc: Cloud Service {
+  shape: cloud
+}
+
+decision: Route? {
+  shape: diamond
+}
+
+doc: Documentation {
+  shape: page
+}
+
+user -> web: HTTP Request
+web -> decision
+decision -> api: Valid
+decision -> web: Invalid
+api -> cache: Check Cache
+api -> db: Query
+api -> cloud_svc: External Call
+db -> api: Results

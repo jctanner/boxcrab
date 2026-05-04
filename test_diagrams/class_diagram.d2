@@ -1,0 +1,25 @@
+# D2 Class and SQL Table diagram test
+
+MyClass: {
+  shape: class
+
+  +name: string
+  +age: int
+  -secret: string
+  #protected_field: bool
+
+  +getName(): string
+  +setAge(age int): void
+  -validate(): bool
+}
+
+users: {
+  shape: sql_table
+
+  id: int {constraint: primary_key}
+  username: varchar(255) {constraint: unique}
+  email: varchar(255)
+  created_at: timestamp
+}
+
+MyClass -> users: stores data

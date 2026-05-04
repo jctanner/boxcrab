@@ -1,0 +1,13 @@
+# Test: spread import and element import
+...@./shared/styles.d2
+
+server: Web Server {
+  class: blue
+}
+
+database: Database {
+  shape: cylinder
+  style.fill: "#fef3c7"
+}
+
+server -> database: queries

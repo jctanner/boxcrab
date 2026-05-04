@@ -2,6 +2,7 @@ mod diagram;
 mod layout;
 mod parser;
 mod renderer;
+mod theme;
 mod watcher;
 
 use clap::Parser as ClapParser;
@@ -13,7 +14,7 @@ use std::time::Instant;
 #[derive(ClapParser)]
 #[command(name = "boxcrab", about = "A native diagram viewer and editor")]
 struct Cli {
-    /// Path to a .mmd file
+    /// Path to a diagram file (.mmd, .dsl, .d2)
     file: PathBuf,
 
     /// Export diagram to PNG instead of opening viewer
@@ -65,7 +66,7 @@ impl BoxcrabApp {
                 }
             }
             _ => {
-                match parser::parse(&source, format, view_index) {
+                match parser::parse(&source, format, view_index, file_path.parent()) {
                     Ok(g) => (Some(g), None, None),
                     Err(e) => (None, Some(e.to_string()), None),
                 }
@@ -130,7 +131,7 @@ impl BoxcrabApp {
                 }
             }
             _ => {
-                match parser::parse(&source, self.format, self.view_index) {
+                match parser::parse(&source, self.format, self.view_index, self.file_path.parent()) {
                     Ok(g) => {
                         self.graph = Some(g);
                         self.parse_error = None;
@@ -291,7 +292,7 @@ impl eframe::App for BoxcrabApp {
                         let cwd = std::env::current_dir().unwrap_or_default();
                         let dialog = rfd::FileDialog::new()
                             .set_directory(&cwd)
-                            .add_filter("Diagram files", &["mmd", "dsl"])
+                            .add_filter("Diagram files", &["mmd", "dsl", "d2"])
                             .add_filter("All files", &["*"]);
                         if let Some(path) = dialog.pick_file() {
                             if let Some(fmt) = parser::detect_format(&path) {
@@ -555,7 +556,7 @@ fn main() {
             eprintln!("Error reading {}: {e}", cli.file.display());
             std::process::exit(1);
         });
-        let graph = parser::parse(&source, format, cli.view).unwrap_or_else(|e| {
+        let graph = parser::parse(&source, format, cli.view, cli.file.parent()).unwrap_or_else(|e| {
             eprintln!("Parse error: {e}");
             std::process::exit(1);
         });

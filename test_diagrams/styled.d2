@@ -1,0 +1,70 @@
+# D2 styled diagram
+
+classes: {
+  blue: {
+    style: {
+      fill: "#4a90e2"
+      stroke: "#2c5ea0"
+      font-color: "#ffffff"
+    }
+  }
+  green: {
+    style: {
+      fill: "#7ed321"
+      stroke: "#5ea01a"
+    }
+  }
+  red: {
+    style: {
+      fill: "#d0021b"
+      stroke: "#a00215"
+      font-color: "#ffffff"
+    }
+  }
+}
+
+load_balancer: Load Balancer {
+  shape: cloud
+  class: blue
+}
+
+server1: Server 1 {
+  shape: rectangle
+  class: green
+}
+
+server2: Server 2 {
+  shape: rectangle
+  class: green
+}
+
+server3: Server 3 {
+  shape: rectangle
+  class: red
+  style.stroke-dash: 5
+}
+
+db_primary: Primary DB {
+  shape: cylinder
+  style: {
+    fill: "#f5a623"
+    stroke: "#c78518"
+  }
+}
+
+db_replica: Replica DB {
+  shape: cylinder
+  style: {
+    fill: "#f5a623"
+    stroke: "#c78518"
+    opacity: 0.6
+  }
+}
+
+load_balancer -> server1: Round Robin
+load_balancer -> server2: Round Robin
+load_balancer -> server3: Failover
+
+server1 -> db_primary
+server2 -> db_primary
+db_primary -> db_replica: Replication

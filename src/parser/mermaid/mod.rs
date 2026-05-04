@@ -80,6 +80,12 @@ fn ensure_node(graph: &mut DiagramGraph, id: &str, shape: Option<NodeShape>, lab
             label: label.map(clean_label).unwrap_or_else(|| id.to_string()),
             shape: shape.unwrap_or(NodeShape::Rect),
             classes: Vec::new(),
+            class_fields: Vec::new(),
+            class_methods: Vec::new(),
+            sql_columns: Vec::new(),
+            near: None,
+            tooltip: None,
+            link: None,
         });
 }
 
@@ -222,6 +228,9 @@ fn parse_link_stmt(pair: pest::iterators::Pair<Rule>, graph: &mut DiagramGraph) 
                         to: to_node.0.clone(),
                         edge_type: etype,
                         label: elabel.clone(),
+                        src_arrowhead: None,
+                        dst_arrowhead: None,
+                        style: StyleProps::default(),
                     });
                 }
             }
@@ -300,6 +309,9 @@ fn parse_subgraph_stmt(pair: pest::iterators::Pair<Rule>, graph: &mut DiagramGra
     graph.subgraphs.push(SubgraphDef {
         title,
         node_ids,
+        grid_rows: None,
+        grid_columns: None,
+        grid_gap: None,
     });
 }
 

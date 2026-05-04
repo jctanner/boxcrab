@@ -1,0 +1,36 @@
+# D2 containers and nesting
+
+direction: down
+
+frontend: Frontend {
+  app: React App
+  store: State Store {
+    shape: cylinder
+  }
+  app -> store
+}
+
+backend: Backend {
+  api: REST API {
+    shape: hexagon
+  }
+  auth: Auth Service
+  worker: Background Worker {
+    shape: step
+  }
+  api -> auth: Validate Token
+  api -> worker: Queue Job
+}
+
+database: Data Layer {
+  postgres: PostgreSQL {
+    shape: cylinder
+  }
+  redis: Redis {
+    shape: queue
+  }
+}
+
+frontend.app -> backend.api: REST Calls
+backend.api -> database.postgres: SQL
+backend.worker -> database.redis: Cache
