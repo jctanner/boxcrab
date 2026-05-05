@@ -55,6 +55,7 @@ pub enum ViewKind {
 pub struct ViewDef {
     pub kind: ViewKind,
     pub target_id: Option<String>,
+    #[allow(dead_code)]
     pub key: Option<String>,
     pub auto_layout: Option<AutoLayout>,
 }
@@ -69,6 +70,7 @@ pub struct AutoLayout {
 #[derive(Debug, Clone, Default)]
 pub struct StylesDef {
     pub element_styles: Vec<ElementStyleDef>,
+    #[allow(dead_code)]
     pub relationship_styles: Vec<RelationshipStyleDef>,
 }
 
@@ -81,6 +83,7 @@ pub struct ElementStyleDef {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct RelationshipStyleDef {
     pub tag: String,
     pub color: Option<String>,

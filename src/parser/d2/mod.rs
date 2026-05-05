@@ -40,6 +40,7 @@ enum Stmt {
         arrow_types: Vec<ArrowType>,
         label: Option<String>,
         style: StyleProps,
+        #[allow(dead_code)]
         body: Vec<Stmt>,
         src_arrowhead: Option<ArrowheadType>,
         dst_arrowhead: Option<ArrowheadType>,

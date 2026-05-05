@@ -1,6 +1,7 @@
 use crate::diagram::StyleProps;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ThemePalette {
     pub n1: [u8; 3],
     pub n2: [u8; 3],

@@ -693,7 +693,7 @@ fn assign_layers(
     let mut back_edges: Vec<(NodeIndex, NodeIndex)> = Vec::new();
 
     let mut sorted_starts: Vec<_> = idx_map.iter().collect();
-    sorted_starts.sort_by_key(|(name, _)| name.clone());
+    sorted_starts.sort_by_key(|(name, _)| (*name).clone());
     for (_, &start) in &sorted_starts {
         if !visited.contains(&start) {
             dfs_find_back_edges(&pg, start, &mut visited, &mut on_stack, &mut back_edges);
