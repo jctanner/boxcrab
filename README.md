@@ -4,9 +4,11 @@
   <img src="assets/img/logo.png" alt="boxcrab logo" width="400">
 </p>
 
-A native diagram viewer built in Rust. Renders Mermaid, Structurizr DSL, and D2 files with crisp output at any zoom level -- no browser, no webview, no Electron.
+A native diagram viewer and editor built in Rust. View Mermaid, Structurizr DSL, and D2 files with crisp output at any zoom level, or create diagrams from scratch in the WYSIWYG editor -- no browser, no webview, no Electron.
 
 ## Features
+
+### Viewer
 
 - **Mermaid (.mmd)**, **Structurizr DSL (.dsl)**, and **D2 (.d2)** support
 - Sugiyama layered graph layout with deterministic positioning
@@ -23,6 +25,18 @@ A native diagram viewer built in Rust. Renders Mermaid, Structurizr DSL, and D2 
 - Fill patterns: dots, lines, grain, paper
 - Tooltips on hover and clickable links (interactive mode)
 
+### Editor
+
+- WYSIWYG diagram editor with 22+ shape types in an icon toolbar
+- Click-to-place nodes, click-to-connect edges
+- Drag-to-move nodes with grid snapping
+- Properties panel: rename labels, change shapes, color picker for fill/stroke/text
+- Undo/redo (Ctrl+Z / Ctrl+Shift+Z)
+- Copy/paste nodes and edges (Ctrl+C / Ctrl+V)
+- Multi-select with Shift+click and group into subgraphs
+- Save as Mermaid (.mmd) or D2 (.d2)
+- Open existing diagram files for editing
+
 ## Usage
 
 Open a diagram in the viewer:
@@ -31,6 +45,12 @@ Open a diagram in the viewer:
 boxcrab diagram.mmd
 boxcrab architecture.dsl
 boxcrab network.d2
+```
+
+Launch the editor with a blank canvas:
+
+```sh
+boxcrab
 ```
 
 Export to PNG:
