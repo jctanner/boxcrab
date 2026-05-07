@@ -152,6 +152,7 @@ mod tests {
 
     fn empty_graph() -> DiagramGraph {
         DiagramGraph {
+            diagram_type: DiagramType::Flowchart,
             direction: Direction::TD,
             nodes: HashMap::new(),
             edges: Vec::new(),
@@ -160,6 +161,7 @@ mod tests {
             class_defs: HashMap::new(),
             layer_spacing: None,
             node_spacing: None,
+            seq_activations: Vec::new(),
         }
     }
 

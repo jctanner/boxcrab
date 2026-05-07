@@ -1,6 +1,18 @@
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagramType {
+    Flowchart,
+    Sequence,
+}
+
+impl Default for DiagramType {
+    fn default() -> Self {
+        DiagramType::Flowchart
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     TD,
     TB,
@@ -150,6 +162,7 @@ pub struct SubgraphDef {
     pub grid_rows: Option<usize>,
     pub grid_columns: Option<usize>,
     pub grid_gap: Option<f32>,
+    pub branches: Vec<(usize, String)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -174,6 +187,7 @@ pub struct StyleProps {
 
 #[derive(Debug, Clone)]
 pub struct DiagramGraph {
+    pub diagram_type: DiagramType,
     pub direction: Direction,
     pub nodes: HashMap<String, NodeDef>,
     pub edges: Vec<EdgeDef>,
@@ -182,4 +196,5 @@ pub struct DiagramGraph {
     pub class_defs: HashMap<String, StyleProps>,
     pub layer_spacing: Option<f32>,
     pub node_spacing: Option<f32>,
+    pub seq_activations: Vec<(String, usize, usize)>,
 }

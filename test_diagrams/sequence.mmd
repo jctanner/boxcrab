@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    actor C as Charlie
+
+    A->>B: Hello Bob!
+    activate B
+    B-->>A: Hi Alice
+    B->>C: Hey Charlie
+    C-->>B: What's up?
+    deactivate B
+    A->>A: Think to self
+
+    alt is OK
+        B->>A: Great news
+    else is bad
+        B->>A: Bad news
+    end
+
+    loop Health Check
+        A->>B: Are you OK?
+        B-->>A: Yes
+    end
+
+    Note right of A: Alice is thinking
+    Note over B,C: They are chatting

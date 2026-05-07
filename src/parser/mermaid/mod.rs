@@ -1,6 +1,7 @@
 mod class_diagram;
-mod state_diagram;
 mod er_diagram;
+mod sequence_diagram;
+mod state_diagram;
 
 use crate::diagram::*;
 use pest::Parser;
@@ -22,10 +23,14 @@ pub fn parse(input: &str) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
     if trimmed.starts_with("erDiagram") {
         return er_diagram::parse(input);
     }
+    if trimmed.starts_with("sequenceDiagram") {
+        return sequence_diagram::parse(input);
+    }
 
     let pairs = MermaidParser::parse(Rule::diagram, input)?;
 
     let mut graph = DiagramGraph {
+        diagram_type: DiagramType::Flowchart,
         direction: Direction::TD,
         nodes: HashMap::new(),
         edges: Vec::new(),
@@ -34,6 +39,7 @@ pub fn parse(input: &str) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
         class_defs: HashMap::new(),
         layer_spacing: None,
         node_spacing: None,
+        seq_activations: Vec::new(),
     };
 
     for pair in pairs {
@@ -399,6 +405,7 @@ fn parse_subgraph_stmt(pair: pest::iterators::Pair<Rule>, graph: &mut DiagramGra
         grid_rows: None,
         grid_columns: None,
         grid_gap: None,
+        branches: Vec::new(),
     });
 }
 

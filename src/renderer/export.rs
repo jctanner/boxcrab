@@ -946,16 +946,52 @@ fn draw_subgraph(
         pixmap.stroke_path(&path, &stroke_paint, &stroke_from(1.0), transform, None);
     }
 
-    draw_text_at(
-        pixmap,
-        &sg.title,
-        sg.x + 8.0,
-        sg.y + 4.0,
-        SMALL_FONT_SIZE,
-        [130, 115, 80],
-        font,
-        transform,
-    );
+    let is_seq_group = sg.title.starts_with("alt ")
+        || sg.title.starts_with("loop ")
+        || sg.title.starts_with("opt ")
+        || sg.title.starts_with("par ")
+        || sg.title.starts_with("critical ")
+        || sg.title.starts_with("break ");
+
+    if is_seq_group {
+        let parts: Vec<&str> = sg.title.splitn(2, ' ').collect();
+        let keyword = parts[0];
+        let condition = parts.get(1).unwrap_or(&"");
+
+        let tag_w = keyword.len() as f32 * 8.0 + 16.0;
+        let tag_h = SMALL_FONT_SIZE + 8.0;
+        if let Some(tag_rect) = Rect::from_xywh(sg.x + 1.0, sg.y + 1.0, tag_w, tag_h) {
+            let tag_paint = paint_from_color(color_from_rgb(90, 90, 90));
+            pixmap.fill_rect(tag_rect, &tag_paint, transform, None);
+        }
+        draw_text_at(pixmap, keyword, sg.x + 9.0, sg.y + 5.0, SMALL_FONT_SIZE, [255, 255, 255], font, transform);
+
+        if !condition.is_empty() {
+            let cond_text = format!("[{condition}]");
+            draw_text_at(pixmap, &cond_text, sg.x + tag_w + 10.0, sg.y + 5.0, SMALL_FONT_SIZE, [100, 100, 100], font, transform);
+        }
+
+        for (branch_y, branch_label) in &sg.branches {
+            let dash_paint = paint_from_color(color_from_rgb(140, 130, 100));
+            let dash_stroke = stroke_from(1.5);
+            draw_dashed_line(pixmap, sg.x + 1.0, *branch_y, sg.x + sg.width - 1.0, *branch_y, &dash_paint, &dash_stroke, 8.0, 4.0, transform);
+            if !branch_label.is_empty() {
+                let label = format!("[{branch_label}]");
+                draw_text_at(pixmap, &label, sg.x + 12.0, *branch_y + 3.0, SMALL_FONT_SIZE, [100, 100, 100], font, transform);
+            }
+        }
+    } else {
+        draw_text_at(
+            pixmap,
+            &sg.title,
+            sg.x + 8.0,
+            sg.y + 4.0,
+            SMALL_FONT_SIZE,
+            [130, 115, 80],
+            font,
+            transform,
+        );
+    }
 }
 
 fn draw_arrowhead(

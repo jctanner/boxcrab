@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 pub fn parse(input: &str) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
     let mut graph = DiagramGraph {
+        diagram_type: DiagramType::Flowchart,
         direction: Direction::TD,
         nodes: HashMap::new(),
         edges: Vec::new(),
@@ -11,6 +12,7 @@ pub fn parse(input: &str) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
         class_defs: HashMap::new(),
         layer_spacing: None,
         node_spacing: None,
+        seq_activations: Vec::new(),
     };
 
     let lines: Vec<&str> = input.lines().collect();

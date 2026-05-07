@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::diagram::{
-    ArrowheadType, ClassField, ClassMethod, DiagramGraph, Direction, EdgeDef, EdgeType,
-    FillPattern, NearPosition, NodeDef, NodeShape, SqlColumn, StyleProps, SubgraphDef,
+    ArrowheadType, ClassField, ClassMethod, DiagramGraph, DiagramType, Direction, EdgeDef,
+    EdgeType, FillPattern, NearPosition, NodeDef, NodeShape, SqlColumn, StyleProps, SubgraphDef,
 };
 use crate::theme;
 
@@ -870,6 +870,7 @@ fn extract_arrowhead_type(label: &Option<String>, body: &[Stmt]) -> Option<Arrow
 
 fn compile(stmts: &[Stmt]) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
     let mut graph = DiagramGraph {
+        diagram_type: DiagramType::Flowchart,
         direction: Direction::TD,
         nodes: HashMap::new(),
         edges: Vec::new(),
@@ -878,6 +879,7 @@ fn compile(stmts: &[Stmt]) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
         class_defs: HashMap::new(),
         layer_spacing: None,
         node_spacing: None,
+        seq_activations: Vec::new(),
     };
 
     let mut class_defs: HashMap<String, ClassDef> = HashMap::new();
@@ -1000,6 +1002,7 @@ fn compile_stmts(
                             grid_rows,
                             grid_columns,
                             grid_gap,
+                            branches: Vec::new(),
                         });
                     }
                 } else {

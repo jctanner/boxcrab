@@ -402,11 +402,72 @@ fn render_subgraph(ui: &Ui, sg: &LayoutSubgraph) {
     painter.rect_filled(rect, 4.0, Color32::from_rgba_unmultiplied(255, 248, 220, 80));
     painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(200, 185, 140)), StrokeKind::Outside);
 
-    painter.text(
-        Pos2::new(sg.x + 8.0, sg.y + 4.0),
-        egui::Align2::LEFT_TOP,
-        &sg.title,
-        FontId::proportional(12.0),
-        Color32::from_rgb(130, 115, 80),
-    );
+    let is_seq_group = sg.title.starts_with("alt ")
+        || sg.title.starts_with("loop ")
+        || sg.title.starts_with("opt ")
+        || sg.title.starts_with("par ")
+        || sg.title.starts_with("critical ")
+        || sg.title.starts_with("break ");
+
+    if is_seq_group {
+        let parts: Vec<&str> = sg.title.splitn(2, ' ').collect();
+        let keyword = parts[0];
+        let condition = parts.get(1).unwrap_or(&"");
+
+        let font_bold = FontId::new(13.0, egui::FontFamily::Proportional);
+        let galley = painter.layout_no_wrap(keyword.to_string(), font_bold.clone(), Color32::WHITE);
+        let tag_w = galley.size().x + 16.0;
+        let tag_h = galley.size().y + 8.0;
+        let tag_rect = Rect::from_min_size(
+            Pos2::new(sg.x + 1.0, sg.y + 1.0),
+            Vec2::new(tag_w, tag_h),
+        );
+        painter.rect_filled(tag_rect, egui::CornerRadius { nw: 3, ne: 0, sw: 0, se: 6 }, Color32::from_rgb(90, 90, 90));
+        painter.text(
+            Pos2::new(sg.x + 9.0, sg.y + 5.0),
+            egui::Align2::LEFT_TOP,
+            keyword,
+            font_bold,
+            Color32::WHITE,
+        );
+
+        if !condition.is_empty() {
+            painter.text(
+                Pos2::new(sg.x + tag_w + 10.0, sg.y + 5.0),
+                egui::Align2::LEFT_TOP,
+                format!("[{condition}]"),
+                FontId::proportional(12.0),
+                Color32::from_rgb(100, 100, 100),
+            );
+        }
+
+        for (branch_y, branch_label) in &sg.branches {
+            let dash_stroke = Stroke::new(1.5, Color32::from_rgb(140, 130, 100));
+            shapes::draw_dashed_line(
+                painter,
+                Pos2::new(sg.x + 1.0, *branch_y),
+                Pos2::new(sg.x + sg.width - 1.0, *branch_y),
+                dash_stroke,
+                8.0,
+                4.0,
+            );
+            if !branch_label.is_empty() {
+                painter.text(
+                    Pos2::new(sg.x + 12.0, *branch_y + 3.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("[{branch_label}]"),
+                    FontId::proportional(11.0),
+                    Color32::from_rgb(100, 100, 100),
+                );
+            }
+        }
+    } else {
+        painter.text(
+            Pos2::new(sg.x + 8.0, sg.y + 4.0),
+            egui::Align2::LEFT_TOP,
+            &sg.title,
+            FontId::proportional(12.0),
+            Color32::from_rgb(130, 115, 80),
+        );
+    }
 }

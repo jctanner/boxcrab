@@ -61,6 +61,7 @@ impl EditorState {
         );
         Self {
             graph: DiagramGraph {
+                diagram_type: DiagramType::Flowchart,
                 direction: Direction::TD,
                 nodes: HashMap::new(),
                 edges: Vec::new(),
@@ -69,6 +70,7 @@ impl EditorState {
                 class_defs: HashMap::new(),
                 layer_spacing: None,
                 node_spacing: None,
+                seq_activations: Vec::new(),
             },
             layout_result: None,
             node_sizes: None,
@@ -352,6 +354,7 @@ impl EditorState {
                     y: min_y - padding,
                     width: (max_sg_x - min_x) + padding * 2.0,
                     height: (max_sg_y - min_y) + padding * 2.0,
+                    branches: Vec::new(),
                 });
             }
         }
@@ -1169,6 +1172,7 @@ fn render_toolbar(state: &mut EditorState, ui: &mut egui::Ui) {
                             grid_rows: None,
                             grid_columns: None,
                             grid_gap: None,
+                            branches: Vec::new(),
                         });
                         state.dirty = true;
                         state.rebuild_layout();

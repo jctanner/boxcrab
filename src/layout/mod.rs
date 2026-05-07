@@ -1,6 +1,7 @@
+mod sequence;
 mod sugiyama;
 
-use crate::diagram::{ArrowheadType, ClassField, ClassMethod, DiagramGraph, Direction, EdgeType, NearPosition, NodeShape, SqlColumn, StyleProps};
+use crate::diagram::{ArrowheadType, ClassField, ClassMethod, DiagramGraph, DiagramType, Direction, EdgeType, NearPosition, NodeShape, SqlColumn, StyleProps};
 use std::collections::HashMap;
 use sugiyama::SimpleEdge;
 
@@ -41,6 +42,7 @@ pub struct LayoutSubgraph {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+    pub branches: Vec<(f32, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +71,10 @@ pub fn compute_layout(
     graph: &DiagramGraph,
     measured_sizes: Option<&HashMap<String, egui::Vec2>>,
 ) -> Result<LayoutResult, String> {
+    if graph.diagram_type == DiagramType::Sequence {
+        return sequence::layout_sequence(graph, measured_sizes);
+    }
+
     use std::collections::HashSet;
 
     let has_edge_labels = graph.edges.iter().any(|e| e.label.is_some());
@@ -356,6 +362,7 @@ pub fn compute_layout(
                     y: offset_y + cy - ch / 2.0,
                     width: cw,
                     height: ch,
+                    branches: Vec::new(),
                 });
             }
         }
@@ -388,6 +395,7 @@ pub fn compute_layout(
                 y: cy - sh / 2.0,
                 width: sw,
                 height: sh,
+                branches: Vec::new(),
             });
         }
     }

@@ -1260,6 +1260,7 @@ pub fn to_diagram_graph(
                 grid_rows: None,
                 grid_columns: None,
                 grid_gap: None,
+                branches: Vec::new(),
             }]
         }
     } else {
@@ -1274,6 +1275,7 @@ pub fn to_diagram_graph(
         .map(|v| v as f32);
 
     Ok(DiagramGraph {
+        diagram_type: DiagramType::Flowchart,
         direction,
         nodes,
         edges: diagram_edges,
@@ -1282,6 +1284,7 @@ pub fn to_diagram_graph(
         class_defs: HashMap::new(),
         layer_spacing,
         node_spacing,
+        seq_activations: Vec::new(),
     })
 }
 
