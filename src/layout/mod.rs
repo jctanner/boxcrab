@@ -5,6 +5,21 @@ use crate::diagram::{ArrowheadType, ClassField, ClassMethod, DiagramGraph, Diagr
 use std::collections::HashMap;
 use sugiyama::SimpleEdge;
 
+impl LayoutEdge {
+    /// The edge as a polyline, sampling the bezier when the edge is curved.
+    pub fn polyline(&self) -> Vec<[f32; 2]> {
+        match (&self.control_points, self.points.first(), self.points.last()) {
+            (Some(cp), Some(&start), Some(&end)) if self.points.len() == 2 => {
+                const STEPS: usize = 24;
+                (0..=STEPS)
+                    .map(|i| bezier_point(start, *cp, end, i as f32 / STEPS as f32))
+                    .collect()
+            }
+            _ => self.points.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LayoutNode {
     pub id: String,
@@ -944,12 +959,13 @@ pub fn route_edges_manual(
         let start = intersect_node(from_pos.0, from_pos.1, fw, fh, fs, to_pos.0, to_pos.1);
         let end = intersect_node(to_pos.0, to_pos.1, tw, th, ts, from_pos.0, from_pos.1);
 
-        let mid = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0];
+        let cp = compute_manual_control_points(start, end);
+        let mid = bezier_midpoint(start, cp, end);
         let label_pos = ed.label.as_ref().map(|_| mid);
 
         edges.push(LayoutEdge {
             points: vec![start, end],
-            control_points: None,
+            control_points: Some(cp),
             edge_type: ed.edge_type,
             label: ed.label.clone(),
             label_pos,
@@ -960,6 +976,21 @@ pub fn route_edges_manual(
         });
     }
     edges
+}
+
+/// Curved control points for manually placed nodes: tangents leave and enter
+/// along whichever axis the endpoints are mostly separated on.
+fn compute_manual_control_points(start: [f32; 2], end: [f32; 2]) -> [[f32; 2]; 2] {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let offset = 0.4;
+    if dy.abs() >= dx.abs() {
+        let oy = dy * offset;
+        [[start[0], start[1] + oy], [end[0], end[1] - oy]]
+    } else {
+        let ox = dx * offset;
+        [[start[0] + ox, start[1]], [end[0] - ox, end[1]]]
+    }
 }
 
 fn compute_bezier_control_points(
@@ -1004,7 +1035,10 @@ fn compute_bezier_control_points(
 }
 
 fn bezier_midpoint(start: [f32; 2], cp: [[f32; 2]; 2], end: [f32; 2]) -> [f32; 2] {
-    let t = 0.5;
+    bezier_point(start, cp, end, 0.5)
+}
+
+fn bezier_point(start: [f32; 2], cp: [[f32; 2]; 2], end: [f32; 2], t: f32) -> [f32; 2] {
     let mt = 1.0 - t;
     let x = mt * mt * mt * start[0]
         + 3.0 * mt * mt * t * cp[0][0]

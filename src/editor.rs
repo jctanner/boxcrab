@@ -393,7 +393,8 @@ impl EditorState {
             if edge.points.len() < 2 {
                 continue;
             }
-            for pair in edge.points.windows(2) {
+            let poly = edge.polyline();
+            for pair in poly.windows(2) {
                 let dist = point_to_segment_distance(
                     scene_pos.x,
                     scene_pos.y,
@@ -1722,7 +1723,8 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                 if let Some(eidx) = selected_edge_idx {
                     if let Some(edge) = layout_result.edges.get(eidx) {
                         let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(70, 130, 200));
-                        for pair in edge.points.windows(2) {
+                        let poly = edge.polyline();
+                        for pair in poly.windows(2) {
                             scene_ui.painter().line_segment(
                                 [
                                     egui::Pos2::new(pair[0][0], pair[0][1]),
