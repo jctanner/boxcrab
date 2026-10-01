@@ -36,6 +36,7 @@ A native diagram viewer and editor built in Rust. View Mermaid, Structurizr DSL,
 - Multi-select with Shift+click and group into subgraphs
 - Save as Mermaid (.mmd) or D2 (.d2)
 - Open existing diagram files for editing
+- Sequence diagram editing (File > New > Mermaid Sequence Diagram, or Switch to Edit Mode on a sequence `.mmd`): add participants/actors, drag between lifelines to add messages, notes, activations, reorder participants and messages; saves back as `sequenceDiagram` Mermaid
 
 ## Usage
 

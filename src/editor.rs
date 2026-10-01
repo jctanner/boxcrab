@@ -7,6 +7,8 @@ use eframe::egui;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+mod seq_ui;
+
 pub enum EditorAction {
     None,
     OpenFile(PathBuf, parser::DiagramFormat),
@@ -49,6 +51,10 @@ pub struct EditorState {
     pub dirty: bool,
     pub confirm_view_switch: bool,
     last_viewport_size: Option<egui::Vec2>,
+    pub seq_tool: seq_ui::SeqTool,
+    pub seq_arrow: usize,
+    seq_drag: Option<seq_ui::SeqDrag>,
+    scene_fitted: bool,
     pub scene_rect: egui::Rect,
     pub full_scene_rect: egui::Rect,
     undo_stack: Vec<UndoSnapshot>,
@@ -86,12 +92,24 @@ impl EditorState {
             dirty: false,
             confirm_view_switch: false,
             last_viewport_size: None,
+            seq_tool: seq_ui::SeqTool::Select,
+            seq_arrow: 0,
+            seq_drag: None,
+            scene_fitted: false,
             scene_rect: scene,
             full_scene_rect: scene,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             clipboard: None,
         }
+    }
+
+    /// A blank sequence diagram.
+    pub fn new_sequence() -> Self {
+        let mut state = Self::new();
+        state.graph = crate::seq_model::new_sequence_graph();
+        state.rebuild_layout();
+        state
     }
 
     pub fn from_file(
@@ -295,7 +313,28 @@ impl EditorState {
         self.rebuild_layout();
     }
 
+    fn rebuild_sequence_layout(&mut self) {
+        match layout::sequence::layout_sequence(&self.graph, self.node_sizes.as_ref()) {
+            Ok(result) => {
+                if !self.scene_fitted && result.total_width > 0.0 {
+                    self.scene_fitted = true;
+                    let w = result.total_width.max(400.0);
+                    let h = result.total_height.max(300.0).min(w * 0.8);
+                    self.full_scene_rect =
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(w, h));
+                    self.scene_rect = self.full_scene_rect;
+                }
+                self.layout_result = Some(result);
+            }
+            Err(_) => self.layout_result = None,
+        }
+    }
+
     fn rebuild_layout(&mut self) {
+        if self.graph.diagram_type == DiagramType::Sequence {
+            self.rebuild_sequence_layout();
+            return;
+        }
         let mut nodes = Vec::new();
         for (id, def) in &self.graph.nodes {
             let (x, y) = self
@@ -500,13 +539,20 @@ pub fn render_editor_ui(
             state.manual_positions.is_empty() && !state.graph.nodes.is_empty();
         if state.node_sizes.as_ref() != Some(&sizes) {
             state.node_sizes = Some(sizes);
-            if needs_initial_layout {
+            if state.graph.diagram_type == DiagramType::Sequence {
+                state.rebuild_layout();
+            } else if needs_initial_layout {
                 state.auto_layout();
                 state.dirty = false;
             } else {
                 state.rebuild_layout();
             }
         }
+    }
+
+    if state.graph.diagram_type == DiagramType::Sequence {
+        seq_ui::render(state, ui);
+        return action;
     }
 
     render_toolbar(state, ui);
@@ -542,10 +588,16 @@ fn render_editor_menu(
             ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("New").clicked() {
-                        ui.close();
-                        *state = EditorState::new();
-                    }
+                    ui.menu_button("New", |ui| {
+                        if ui.button("Mermaid Flowchart").clicked() {
+                            ui.close();
+                            *state = EditorState::new();
+                        }
+                        if ui.button("Mermaid Sequence Diagram").clicked() {
+                            ui.close();
+                            *state = EditorState::new_sequence();
+                        }
+                    });
                     let view_target = state.file_path.as_deref().and_then(|p| {
                         parser::detect_format(p).map(|f| (p.to_path_buf(), f))
                     });
@@ -1586,24 +1638,7 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
 
     let viewport_rect = ui.available_rect_before_wrap();
 
-    // When the viewport resizes (e.g. the properties panel opens), egui::Scene
-    // would refit the scene rect and change the zoom. Resize the scene rect
-    // proportionally instead so the zoom level and top-left anchor stay put.
-    let vp_size = viewport_rect.size();
-    if let Some(prev) = state.last_viewport_size {
-        if prev.x > 1.0 && prev.y > 1.0 && vp_size.x > 1.0 && vp_size.y > 1.0 && prev != vp_size {
-            let r = state.scene_rect;
-            state.scene_rect = egui::Rect::from_min_size(
-                r.min,
-                egui::Vec2::new(
-                    r.width() * vp_size.x / prev.x,
-                    r.height() * vp_size.y / prev.y,
-                ),
-            );
-        }
-    }
-    state.last_viewport_size = Some(vp_size);
-    let scene_rect_before = state.scene_rect;
+    let scene_rect_before = sync_scene_rect(state, viewport_rect);
 
     let mouse_scene_pos = ui
         .input(|i| i.pointer.hover_pos())
@@ -1923,6 +1958,28 @@ fn nearest_handle(node: &layout::LayoutNode, pos: egui::Pos2) -> usize {
         .min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
         .map(|(i, _)| i)
         .unwrap_or(0)
+}
+
+/// When the viewport resizes (e.g. the properties panel opens), egui::Scene
+/// would refit the scene rect and change the zoom. Resize the scene rect
+/// proportionally instead so the zoom level and top-left anchor stay put.
+/// Returns the (possibly adjusted) scene rect to use for this frame.
+fn sync_scene_rect(state: &mut EditorState, viewport_rect: egui::Rect) -> egui::Rect {
+    let vp_size = viewport_rect.size();
+    if let Some(prev) = state.last_viewport_size {
+        if prev.x > 1.0 && prev.y > 1.0 && vp_size.x > 1.0 && vp_size.y > 1.0 && prev != vp_size {
+            let r = state.scene_rect;
+            state.scene_rect = egui::Rect::from_min_size(
+                r.min,
+                egui::Vec2::new(
+                    r.width() * vp_size.x / prev.x,
+                    r.height() * vp_size.y / prev.y,
+                ),
+            );
+        }
+    }
+    state.last_viewport_size = Some(vp_size);
+    state.scene_rect
 }
 
 fn screen_to_scene(

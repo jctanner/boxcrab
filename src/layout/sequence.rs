@@ -14,6 +14,27 @@ const NOTE_WIDTH: f32 = 120.0;
 const NOTE_HEIGHT: f32 = 30.0;
 const MARGIN: f32 = 40.0;
 
+/// Rough rendered width of an edge label (12pt proportional font), used to
+/// position labels that must start at an anchor rather than be centered on it.
+pub fn estimate_label_width(label: &str) -> f32 {
+    label.chars().count() as f32 * 6.4 + 8.0
+}
+
+/// Y coordinate at which the message in timeline `slot` is drawn.
+pub fn slot_y(slot: usize) -> f32 {
+    MARGIN + PARTICIPANT_BOX_HEIGHT + LIFELINE_TOP_MARGIN + slot as f32 * MESSAGE_SPACING
+}
+
+/// Nearest timeline slot (0..=n) for a scene-space y coordinate.
+pub fn slot_at_y(y: f32, n: usize) -> usize {
+    (((y - slot_y(0)) / MESSAGE_SPACING).round().max(0.0) as usize).min(n)
+}
+
+/// (top, bottom) y of the lifelines for a diagram with `n` timeline slots.
+pub fn lifeline_range(n: usize) -> (f32, f32) {
+    (MARGIN + PARTICIPANT_BOX_HEIGHT, slot_y(n) + LIFELINE_TOP_MARGIN)
+}
+
 pub fn layout_sequence(
     graph: &DiagramGraph,
     measured_sizes: Option<&HashMap<String, egui::Vec2>>,
@@ -151,7 +172,14 @@ pub fn layout_sequence(
                 control_points: None,
                 edge_type: edge.edge_type,
                 label: edge.label.clone(),
-                label_pos: Some([x + SELF_MSG_WIDTH + 5.0, y + SELF_MSG_HEIGHT / 2.0]),
+                // Labels are drawn centered on label_pos, so shift right by half the
+                // label width to start just past the loop, and sit on its top row so
+                // the next message's label (drawn above its own arrow) can't collide.
+                label_pos: Some([
+                    x + SELF_MSG_WIDTH + 8.0
+                        + edge.label.as_deref().map_or(0.0, estimate_label_width) / 2.0,
+                    y + 4.0,
+                ]),
                 reversed: false,
                 src_arrowhead: edge.src_arrowhead,
                 dst_arrowhead: edge.dst_arrowhead,
@@ -287,4 +315,39 @@ pub fn layout_sequence(
         total_width,
         total_height,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn self_message_label_does_not_collide_with_next_label() {
+        let src = "sequenceDiagram
+    participant CI
+    participant FS
+    CI->>CI: prepare-request.py writes .prototype/request.json
+    CI->>FS: fullsend run rhaistrat with creator checkout and RHAISTRAT_MODEL
+";
+        let g = crate::parser::mermaid::parse(src).unwrap();
+        let r = layout_sequence(&g, None).unwrap();
+        let rects: Vec<egui::Rect> = r
+            .edges
+            .iter()
+            .filter_map(|e| {
+                let lp = e.label_pos?;
+                let w = estimate_label_width(e.label.as_deref()?);
+                Some(egui::Rect::from_center_size(
+                    egui::Pos2::new(lp[0], lp[1]),
+                    egui::Vec2::new(w, 16.0),
+                ))
+            })
+            .collect();
+        assert_eq!(rects.len(), 2);
+        assert!(!rects[0].intersects(rects[1]), "{:?} vs {:?}", rects[0], rects[1]);
+        // The self label starts to the right of the lifeline instead of
+        // straddling it.
+        let lifeline_x = r.edges[0].points[0][0];
+        assert!(rects[0].min.x > lifeline_x);
+    }
 }

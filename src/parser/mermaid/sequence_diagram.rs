@@ -230,8 +230,9 @@ pub fn parse(input: &str) -> Result<DiagramGraph, Box<dyn std::error::Error>> {
                 activations.insert(to_id.clone(), msg_index);
             }
             if deactivate_target {
-                if let Some(start) = activations.remove(&to_id) {
-                    graph.seq_activations.push((to_id, start, msg_index + 1));
+                // `B-->>-A` deactivates the sender (B), not the target.
+                if let Some(start) = activations.remove(&from_id) {
+                    graph.seq_activations.push((from_id, start, msg_index + 1));
                 }
             }
 

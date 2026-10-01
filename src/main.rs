@@ -4,6 +4,7 @@ mod layout;
 mod parser;
 mod renderer;
 mod serializer;
+mod seq_model;
 mod session;
 mod theme;
 mod watcher;
@@ -36,6 +37,7 @@ struct Cli {
 enum ViewerAction {
     None,
     NewDiagram,
+    NewSequence,
     EditCurrent(PathBuf, parser::DiagramFormat),
 }
 
@@ -330,6 +332,10 @@ impl ViewerState {
                         ui.menu_button("New", |ui| {
                             if ui.button("Mermaid Flowchart").clicked() {
                                 action = ViewerAction::NewDiagram;
+                                ui.close();
+                            }
+                            if ui.button("Mermaid Sequence Diagram").clicked() {
+                                action = ViewerAction::NewSequence;
                                 ui.close();
                             }
                         });
@@ -649,6 +655,9 @@ impl eframe::App for BoxcrabApp {
                     ViewerAction::None => {}
                     ViewerAction::NewDiagram => {
                         self.mode = AppMode::Editor(editor::EditorState::new());
+                    }
+                    ViewerAction::NewSequence => {
+                        self.mode = AppMode::Editor(editor::EditorState::new_sequence());
                     }
                     ViewerAction::EditCurrent(path, fmt) => {
                         match editor::EditorState::from_file(path, fmt) {

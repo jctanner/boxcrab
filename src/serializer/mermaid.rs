@@ -1,6 +1,9 @@
 use crate::diagram::*;
 
 pub fn serialize(graph: &DiagramGraph) -> String {
+    if graph.diagram_type == DiagramType::Sequence {
+        return serialize_sequence(graph);
+    }
     let mut out = String::new();
 
     let dir = match graph.direction {
@@ -74,6 +77,122 @@ pub fn serialize(graph: &DiagramGraph) -> String {
         }
     }
 
+    out
+}
+
+/// Serialize a sequence diagram (see `seq_model` for how it is stored).
+fn serialize_sequence(g: &DiagramGraph) -> String {
+    use crate::seq_model::{arrow_token, is_note, name_of, note_info, participant_ids};
+
+    let mut out = String::from("sequenceDiagram\n");
+    for id in participant_ids(g) {
+        let def = &g.nodes[&id];
+        let name = name_of(&id);
+        let kw = if def.shape == NodeShape::Person { "actor" } else { "participant" };
+        if def.label == name {
+            out.push_str(&format!("    {kw} {name}\n"));
+        } else {
+            out.push_str(&format!("    {kw} {name} as {}\n", def.label));
+        }
+    }
+
+    let n = g.edges.len();
+    let span = |a: &(String, usize, usize)| (a.1.min(n), a.2.min(n));
+    let group_span = |sg: &SubgraphDef| {
+        let start = sg.grid_rows.unwrap_or(0).min(n);
+        let end = sg.grid_columns.unwrap_or(n).min(n).max(start);
+        (start, end)
+    };
+
+    let mut depth = 0usize;
+    let indent = |depth: usize| " ".repeat(4 + depth * 2);
+
+    for slot in 0..=n {
+        for a in &g.seq_activations {
+            let (start, end) = span(a);
+            if end == slot && end > start && g.nodes.contains_key(&a.0) {
+                out.push_str(&format!("{}deactivate {}\n", indent(depth), name_of(&a.0)));
+            }
+        }
+
+        let mut ending: Vec<&SubgraphDef> = g
+            .subgraphs
+            .iter()
+            .filter(|sg| group_span(sg).1 == slot)
+            .collect();
+        ending.sort_by_key(|sg| std::cmp::Reverse(group_span(sg).0));
+        for _ in ending {
+            depth = depth.saturating_sub(1);
+            out.push_str(&format!("{}end\n", indent(depth)));
+        }
+
+        for sg in &g.subgraphs {
+            for (idx, label) in &sg.branches {
+                if (*idx).min(n) == slot {
+                    let kw = if sg.title.starts_with("par") { "and" } else { "else" };
+                    out.push_str(&format!(
+                        "{}{} {}\n",
+                        indent(depth.saturating_sub(1)),
+                        kw,
+                        label
+                    ));
+                }
+            }
+        }
+
+        let mut starting: Vec<&SubgraphDef> = g
+            .subgraphs
+            .iter()
+            .filter(|sg| group_span(sg).0 == slot)
+            .collect();
+        starting.sort_by_key(|sg| std::cmp::Reverse(group_span(sg).1));
+        for sg in starting {
+            out.push_str(&format!("{}{}\n", indent(depth), sg.title.trim()));
+            depth += 1;
+        }
+
+        for a in &g.seq_activations {
+            let (start, end) = span(a);
+            if start == slot && end > start && g.nodes.contains_key(&a.0) {
+                out.push_str(&format!("{}activate {}\n", indent(depth), name_of(&a.0)));
+            }
+        }
+
+        if slot == n {
+            break;
+        }
+        let e = &g.edges[slot];
+        if is_note(&e.to) {
+            let Some(def) = g.nodes.get(&e.to) else { continue };
+            let info = note_info(def);
+            let mut names: Vec<String> = info
+                .names
+                .into_iter()
+                .filter(|nm| participant_ids(g).iter().any(|p| name_of(p) == nm))
+                .collect();
+            if names.is_empty() {
+                names.push(name_of(&e.from).to_string());
+            }
+            let pos = match info.position.as_str() {
+                "left" => "left of",
+                "over" => "over",
+                _ => "right of",
+            };
+            out.push_str(&format!(
+                "{}Note {} {}: {}\n",
+                indent(depth),
+                pos,
+                names.join(","),
+                def.label
+            ));
+        } else {
+            let line = format!("{}{}{}", name_of(&e.from), arrow_token(e), name_of(&e.to));
+            match &e.label {
+                Some(l) => out.push_str(&format!("{}{}: {}\n", indent(depth), line, l)),
+                None => out.push_str(&format!("{}{}\n", indent(depth), line)),
+            }
+        }
+    }
     out
 }
 
@@ -225,5 +344,90 @@ mod tests {
         let g2 = crate::parser::parse(&out, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
         assert_eq!(g2.nodes["A"].classes, vec!["hot".to_string()]);
         assert_eq!(g2.class_defs["hot"].fill, Some([255, 0, 0]));
+    }
+
+    fn seq_summary(g: &DiagramGraph) -> String {
+        let mut nodes: Vec<_> = g
+            .nodes
+            .iter()
+            .map(|(k, n)| format!("{k}|{}|{:?}|{:?}", n.label, n.shape, n.tooltip))
+            .collect();
+        nodes.sort();
+        let edges: Vec<_> = g
+            .edges
+            .iter()
+            .map(|e| format!("{}>{}|{:?}|{:?}|{:?}", e.from, e.to, e.edge_type, e.label, e.dst_arrowhead))
+            .collect();
+        let mut acts: Vec<_> = g.seq_activations.iter().map(|a| format!("{a:?}")).collect();
+        acts.sort();
+        let groups: Vec<_> = g
+            .subgraphs
+            .iter()
+            .map(|s| format!("{}|{:?}|{:?}|{:?}", s.title, s.grid_rows, s.grid_columns, s.branches))
+            .collect();
+        let text = format!("{nodes:#?}\n{edges:#?}\n{acts:#?}\n{groups:#?}");
+        // Note ids are numbered differently by the parser; ignore the number.
+        let mut norm = String::new();
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find("__note_") {
+            norm.push_str(&rest[..i + 7]);
+            rest = rest[i + 7..].trim_start_matches(|c: char| c.is_ascii_digit());
+        }
+        norm.push_str(rest);
+        norm
+    }
+
+    #[test]
+    fn sequence_round_trip() {
+        let src = "sequenceDiagram
+    participant A as Alice
+    actor B as Bob
+    participant C
+    A->>+B: hello
+    Note right of A: thinking
+    B-->>-A: hi
+    alt ok
+        A->>C: do
+        Note over A,C: both
+    else bad
+        C-->>A: err
+    end
+    loop forever
+        A-)B: ping
+        A->>A: self
+        A-xC: boom
+    end
+    par x
+        A->>B: one
+    and y
+        A->>C: two
+    end
+    A-->B: dashed line
+";
+        let g1 = crate::parser::parse(src, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
+        assert_eq!(g1.diagram_type, DiagramType::Sequence);
+        let text = serialize(&g1);
+        assert!(text.starts_with("sequenceDiagram"), "{text}");
+        let g2 = crate::parser::parse(&text, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
+        assert_eq!(seq_summary(&g1), seq_summary(&g2), "{text}");
+        // And it is stable once serialized.
+        assert_eq!(text, serialize(&g2));
+    }
+
+    #[test]
+    fn sequence_edited_graph_serializes() {
+        use crate::seq_model::*;
+        let mut g = new_sequence_graph();
+        let a = add_participant(&mut g, 0, NodeShape::Rect);
+        let b = add_participant(&mut g, 1, NodeShape::Person);
+        add_message(&mut g, 0, &a, &b, 1);
+        add_note(&mut g, 1, &b, "left");
+        let text = serialize(&g);
+        assert!(text.contains("participant P1 as Participant 1"), "{text}");
+        assert!(text.contains("actor P2 as Actor 2"), "{text}");
+        assert!(text.contains("P1-->>P2: Message"), "{text}");
+        assert!(text.contains("Note left of P2: Note"), "{text}");
+        let g2 = crate::parser::parse(&text, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
+        assert_eq!(seq_summary(&g), seq_summary(&g2));
     }
 }

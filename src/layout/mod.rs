@@ -1,4 +1,4 @@
-mod sequence;
+pub mod sequence;
 mod sugiyama;
 
 use crate::diagram::{ArrowheadType, ClassField, ClassMethod, DiagramGraph, DiagramType, Direction, EdgeType, NearPosition, NodeShape, SqlColumn, StyleProps};
