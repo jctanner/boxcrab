@@ -19,6 +19,7 @@ pub enum InteractionState {
     PlacingNode { shape: NodeShape },
     ConnectingEdge { source_id: String },
     DraggingNode { node_id: String, unsnapped: (f32, f32) },
+    DraggingEdge { source_id: String, source_handle: usize },
 }
 
 #[derive(Clone)]
@@ -1618,13 +1619,77 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         InteractionState::ConnectingEdge { .. }
     );
 
+    let zoom = (viewport_rect.width() / scene_rect_before.width())
+        .min(viewport_rect.height() / scene_rect_before.height())
+        .max(0.001);
+    let handle_radius = HANDLE_RADIUS_PX / zoom;
+    let is_dragging_edge = matches!(
+        state.interaction,
+        InteractionState::DraggingEdge { .. }
+    );
+
+    // Nodes that currently show connection handles: hovered or selected
+    // (only while idle), plus the drag target while dragging an edge.
+    let mut handle_nodes: Vec<String> = Vec::new();
+    let mut drag_target: Option<(String, usize)> = None;
+    if let Some(layout) = &layout_snap {
+        let idle = state.interaction == InteractionState::Idle;
+        if idle || is_dragging_edge {
+            for node in &layout.nodes {
+                let reach = handle_radius * 2.0;
+                let near = mouse_scene_pos.is_some_and(|p| {
+                    egui::Rect::from_center_size(
+                        egui::Pos2::new(node.x, node.y),
+                        egui::Vec2::new(node.width + reach * 2.0, node.height + reach * 2.0),
+                    )
+                    .contains(p)
+                });
+                let show = if idle {
+                    near || selected.contains(&node.id)
+                } else {
+                    hover_node_id.as_deref() == Some(node.id.as_str())
+                };
+                if show {
+                    handle_nodes.push(node.id.clone());
+                }
+            }
+        }
+        if let (InteractionState::DraggingEdge { source_id, .. }, Some(mp)) =
+            (&state.interaction, mouse_scene_pos)
+        {
+            if let Some(hid) = hover_node_id.as_ref().filter(|h| *h != source_id) {
+                if let Some(node) = layout.nodes.iter().find(|n| n.id == *hid) {
+                    let idx = nearest_handle(node, mp);
+                    drag_target = Some((hid.clone(), idx));
+                }
+            }
+        }
+    }
+    let handle_hit: Option<(String, usize)> =
+        if state.interaction == InteractionState::Idle {
+            mouse_scene_pos.and_then(|p| {
+                let layout = layout_snap.as_ref()?;
+                for id in &handle_nodes {
+                    let node = layout.nodes.iter().find(|n| n.id == *id)?;
+                    for (i, hp) in handle_points(node).iter().enumerate() {
+                        if hp.distance(p) <= handle_radius * 1.6 {
+                            return Some((id.clone(), i));
+                        }
+                    }
+                }
+                None
+            })
+        } else {
+            None
+        };
+
     let is_dragging_node = matches!(
         state.interaction,
         InteractionState::DraggingNode { .. }
     );
     let has_selection = !state.selected_nodes.is_empty();
 
-    let pan_buttons = if is_dragging_node || has_selection || is_connecting {
+    let pan_buttons = if is_dragging_node || has_selection || is_connecting || is_dragging_edge {
         egui::DragPanButtons::MIDDLE | egui::DragPanButtons::SECONDARY
     } else {
         egui::DragPanButtons::all()
@@ -1718,6 +1783,50 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                 }
             }
 
+            if let Some(layout_result) = &layout_snap {
+                let blue = egui::Color32::from_rgb(70, 130, 200);
+                for id in &handle_nodes {
+                    if let Some(node) = layout_result.nodes.iter().find(|n| n.id == *id) {
+                        for (i, hp) in handle_points(node).iter().enumerate() {
+                            let snapped = drag_target
+                                .as_ref()
+                                .is_some_and(|(tid, ti)| tid == id && *ti == i);
+                            let r = if snapped { handle_radius * 1.4 } else { handle_radius };
+                            let fill = if snapped { blue } else { egui::Color32::WHITE };
+                            scene_ui.painter().circle_filled(*hp, r, fill);
+                            scene_ui.painter().circle_stroke(
+                                *hp,
+                                r,
+                                egui::Stroke::new(1.5 / zoom, blue),
+                            );
+                        }
+                    }
+                }
+                if let InteractionState::DraggingEdge { source_id, source_handle } =
+                    &state.interaction
+                {
+                    if let Some(src) = layout_result.nodes.iter().find(|n| n.id == *source_id) {
+                        let start = handle_points(src)[*source_handle];
+                        let end = drag_target
+                            .as_ref()
+                            .and_then(|(tid, ti)| {
+                                layout_result
+                                    .nodes
+                                    .iter()
+                                    .find(|n| n.id == *tid)
+                                    .map(|n| handle_points(n)[*ti])
+                            })
+                            .or(mouse_scene_pos);
+                        if let Some(end) = end {
+                            scene_ui.painter().line_segment(
+                                [start, end],
+                                egui::Stroke::new(2.0 / zoom.min(1.0).max(0.5), blue),
+                            );
+                        }
+                    }
+                }
+            }
+
             if is_empty {
                 let center = scene_ui.clip_rect().center();
                 scene_ui.painter().text(
@@ -1740,7 +1849,7 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
             if viewport_rect.contains(pointer_pos) {
                 let shift_held = ui.input(|i| i.modifiers.shift);
                 let scene_pos = screen_to_scene(pointer_pos, viewport_rect, scene_rect_before);
-                handle_canvas_click(state, scene_pos, shift_held);
+                handle_canvas_click(state, scene_pos, shift_held, handle_hit);
             }
         }
     }
@@ -1771,7 +1880,37 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         if let InteractionState::DraggingNode { .. } = state.interaction {
             state.interaction = InteractionState::Idle;
         }
+        if let InteractionState::DraggingEdge { source_id, .. } = state.interaction.clone() {
+            state.interaction = InteractionState::Idle;
+            if let Some((target_id, _)) = drag_target {
+                if target_id != source_id {
+                    state.add_edge(source_id, target_id);
+                }
+            }
+        }
     }
+}
+
+const HANDLE_RADIUS_PX: f32 = 5.0;
+
+/// Connection handle positions (top, right, bottom, left) in scene coordinates.
+fn handle_points(node: &layout::LayoutNode) -> [egui::Pos2; 4] {
+    let (hw, hh) = (node.width / 2.0, node.height / 2.0);
+    [
+        egui::Pos2::new(node.x, node.y - hh),
+        egui::Pos2::new(node.x + hw, node.y),
+        egui::Pos2::new(node.x, node.y + hh),
+        egui::Pos2::new(node.x - hw, node.y),
+    ]
+}
+
+fn nearest_handle(node: &layout::LayoutNode, pos: egui::Pos2) -> usize {
+    handle_points(node)
+        .iter()
+        .enumerate()
+        .min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
 }
 
 fn screen_to_scene(
@@ -1790,7 +1929,12 @@ fn screen_to_scene(
     )
 }
 
-fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2, shift: bool) {
+fn handle_canvas_click(
+    state: &mut EditorState,
+    scene_pos: egui::Pos2,
+    shift: bool,
+    handle_hit: Option<(String, usize)>,
+) {
     match state.interaction.clone() {
         InteractionState::PlacingNode { shape } => {
             state.place_node(shape, scene_pos);
@@ -1811,7 +1955,12 @@ fn handle_canvas_click(state: &mut EditorState, scene_pos: egui::Pos2, shift: bo
                 source_id: String::new(),
             };
         }
+        InteractionState::DraggingEdge { .. } => {}
         InteractionState::Idle | InteractionState::DraggingNode { .. } => {
+            if let Some((source_id, source_handle)) = handle_hit {
+                state.interaction = InteractionState::DraggingEdge { source_id, source_handle };
+                return;
+            }
             if let Some(node_id) = state.node_at_scene_pos(scene_pos) {
                 if shift {
                     if state.selected_nodes.contains(&node_id) {
