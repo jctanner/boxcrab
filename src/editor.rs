@@ -315,12 +315,7 @@ impl EditorState {
                 height: h,
                 label: def.label.clone(),
                 shape: def.shape,
-                style: self
-                    .graph
-                    .styles
-                    .get(id)
-                    .cloned()
-                    .unwrap_or_default(),
+                style: layout::resolve_style(&self.graph, id),
                 class_fields: def.class_fields.clone(),
                 class_methods: def.class_methods.clone(),
                 sql_columns: def.sql_columns.clone(),

@@ -46,26 +46,52 @@ pub fn serialize(graph: &DiagramGraph) -> String {
         out.push_str("    end\n");
     }
 
-    for (id, style) in &graph.styles {
-        let mut props = Vec::new();
-        if let Some(fill) = style.fill {
-            props.push(format!("fill:#{:02x}{:02x}{:02x}", fill[0], fill[1], fill[2]));
+    let mut class_names: Vec<&String> = graph.class_defs.keys().collect();
+    class_names.sort();
+    for name in &class_names {
+        let props = style_props(&graph.class_defs[*name]);
+        if !props.is_empty() {
+            out.push_str(&format!("    classDef {} {}\n", name, props.join(",")));
         }
-        if let Some(stroke) = style.stroke {
-            props.push(format!("stroke:#{:02x}{:02x}{:02x}", stroke[0], stroke[1], stroke[2]));
+    }
+    for name in &class_names {
+        let members: Vec<&str> = node_ids
+            .iter()
+            .filter(|id| graph.nodes[**id].classes.contains(*name))
+            .map(|id| id.as_str())
+            .collect();
+        if !members.is_empty() {
+            out.push_str(&format!("    class {} {}\n", members.join(","), name));
         }
-        if let Some(color) = style.color {
-            props.push(format!("color:#{:02x}{:02x}{:02x}", color[0], color[1], color[2]));
-        }
-        if let Some(sw) = style.stroke_width {
-            props.push(format!("stroke-width:{sw}px"));
-        }
+    }
+
+    let mut styled: Vec<&String> = graph.styles.keys().collect();
+    styled.sort();
+    for id in styled {
+        let props = style_props(&graph.styles[id]);
         if !props.is_empty() {
             out.push_str(&format!("    style {} {}\n", id, props.join(",")));
         }
     }
 
     out
+}
+
+fn style_props(style: &StyleProps) -> Vec<String> {
+    let mut props = Vec::new();
+    if let Some(fill) = style.fill {
+        props.push(format!("fill:#{:02x}{:02x}{:02x}", fill[0], fill[1], fill[2]));
+    }
+    if let Some(stroke) = style.stroke {
+        props.push(format!("stroke:#{:02x}{:02x}{:02x}", stroke[0], stroke[1], stroke[2]));
+    }
+    if let Some(color) = style.color {
+        props.push(format!("color:#{:02x}{:02x}{:02x}", color[0], color[1], color[2]));
+    }
+    if let Some(sw) = style.stroke_width {
+        props.push(format!("stroke-width:{sw}px"));
+    }
+    props
 }
 
 fn shape_brackets(shape: NodeShape) -> (&'static str, &'static str) {
@@ -187,5 +213,17 @@ mod tests {
         assert_eq!(parsed.nodes["y"].shape, NodeShape::Hexagon);
         assert_eq!(parsed.edges.len(), 1);
         assert_eq!(parsed.edges[0].edge_type, EdgeType::DottedArrow);
+    }
+
+    #[test]
+    fn class_defs_round_trip() {
+        let src = "flowchart TD\n    A[One]\n    B[Two]\n    A --> B\n    classDef hot fill:#ff0000,stroke:#000000\n    class A,B hot\n";
+        let g = crate::parser::parse(src, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
+        let out = serialize(&g);
+        assert!(out.contains("classDef hot fill:#ff0000,stroke:#000000"), "{out}");
+        assert!(out.contains("class A,B hot"), "{out}");
+        let g2 = crate::parser::parse(&out, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
+        assert_eq!(g2.nodes["A"].classes, vec!["hot".to_string()]);
+        assert_eq!(g2.class_defs["hot"].fill, Some([255, 0, 0]));
     }
 }

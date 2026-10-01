@@ -1017,7 +1017,7 @@ fn bezier_midpoint(start: [f32; 2], cp: [[f32; 2]; 2], end: [f32; 2]) -> [f32; 2
     [x, y]
 }
 
-fn resolve_style(graph: &DiagramGraph, node_id: &str) -> StyleProps {
+pub(crate) fn resolve_style(graph: &DiagramGraph, node_id: &str) -> StyleProps {
     let mut style = StyleProps::default();
 
     if let Some(node) = graph.nodes.get(node_id) {
