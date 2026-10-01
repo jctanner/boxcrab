@@ -483,11 +483,15 @@ const TOOLBAR_SHAPES: &[(&str, &[(NodeShape, &str)])] = &[
     ),
 ];
 
-pub fn render_editor_ui(state: &mut EditorState, ui: &mut egui::Ui) -> EditorAction {
+pub fn render_editor_ui(
+    state: &mut EditorState,
+    ui: &mut egui::Ui,
+    session: &mut crate::session::Session,
+) -> EditorAction {
     ui.painter()
         .rect_filled(ui.max_rect(), 0.0, egui::Color32::WHITE);
 
-    let action = render_editor_menu(state, ui);
+    let action = render_editor_menu(state, ui, session);
 
     let measured = renderer::measure_node_texts(ui, &Some(state.graph.clone()));
     if let Some(sizes) = measured {
@@ -516,7 +520,11 @@ pub fn render_editor_ui(state: &mut EditorState, ui: &mut egui::Ui) -> EditorAct
     action
 }
 
-fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorAction {
+fn render_editor_menu(
+    state: &mut EditorState,
+    ui: &mut egui::Ui,
+    session: &mut crate::session::Session,
+) -> EditorAction {
     let mut action = EditorAction::None;
 
     egui::Panel::top("editor_menu_bar")
@@ -557,28 +565,36 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                     ui.separator();
                     if ui.button("Open in Viewer...").clicked() {
                         ui.close();
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let dialog = rfd::FileDialog::new()
-                            .set_directory(&cwd)
+                        let dialog = session.dialog()
                             .add_filter("Diagram files", &["mmd", "dsl", "d2"])
                             .add_filter("All files", &["*"]);
                         if let Some(path) = dialog.pick_file() {
                             if let Some(fmt) = parser::detect_format(&path) {
+                                session.note(&path);
                                 action = EditorAction::OpenFile(path, fmt);
                             }
                         }
                     }
                     if ui.button("Open for Editing...").clicked() {
                         ui.close();
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let dialog = rfd::FileDialog::new()
-                            .set_directory(&cwd)
+                        let dialog = session.dialog()
                             .add_filter("Diagram files", &["mmd", "dsl", "d2"])
                             .add_filter("All files", &["*"]);
                         if let Some(path) = dialog.pick_file() {
                             if let Some(fmt) = parser::detect_format(&path) {
+                                session.note(&path);
                                 action = EditorAction::EditFile(path, fmt);
                             }
+                        }
+                    }
+                    if let Some(path) = session.recent_menu(ui) {
+                        if let Some(fmt) = parser::detect_format(&path) {
+                            session.note(&path);
+                            action = if fmt == parser::DiagramFormat::Structurizr {
+                                EditorAction::OpenFile(path, fmt)
+                            } else {
+                                EditorAction::EditFile(path, fmt)
+                            };
                         }
                     }
                     ui.separator();
@@ -595,9 +611,7 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                     }
                     if ui.button("Save As...").clicked() {
                         ui.close();
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let dialog = rfd::FileDialog::new()
-                            .set_directory(&cwd)
+                        let dialog = session.dialog()
                             .add_filter("Mermaid", &["mmd"])
                             .add_filter("D2", &["d2"])
                             .set_file_name("diagram.mmd");
@@ -606,6 +620,7 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                             if let Err(e) = std::fs::write(&path, &text) {
                                 eprintln!("Save error: {e}");
                             } else {
+                                session.note(&path);
                                 state.file_path = Some(path);
                                 state.dirty = false;
                             }

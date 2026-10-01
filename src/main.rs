@@ -4,6 +4,7 @@ mod layout;
 mod parser;
 mod renderer;
 mod serializer;
+mod session;
 mod theme;
 mod watcher;
 
@@ -281,7 +282,7 @@ impl ViewerState {
         self.do_layout();
     }
 
-    fn render(&mut self, ui: &mut egui::Ui) -> ViewerAction {
+    fn render(&mut self, ui: &mut egui::Ui, session: &mut session::Session) -> ViewerAction {
         let mut action = ViewerAction::None;
 
         self.check_file_updates();
@@ -349,13 +350,12 @@ impl ViewerState {
                         ui.separator();
                         if ui.button("Open...").clicked() {
                             ui.close();
-                            let cwd = std::env::current_dir().unwrap_or_default();
-                            let dialog = rfd::FileDialog::new()
-                                .set_directory(&cwd)
+                            let dialog = session.dialog()
                                 .add_filter("Diagram files", &["mmd", "dsl", "d2"])
                                 .add_filter("All files", &["*"]);
                             if let Some(path) = dialog.pick_file() {
                                 if let Some(fmt) = parser::detect_format(&path) {
+                                    session.note(&path);
                                     self.open_file(path, fmt);
                                 } else {
                                     self.parse_error = Some(format!(
@@ -365,13 +365,17 @@ impl ViewerState {
                                 }
                             }
                         }
+                        if let Some(path) = session.recent_menu(ui) {
+                            if let Some(fmt) = parser::detect_format(&path) {
+                                session.note(&path);
+                                self.open_file(path, fmt);
+                            }
+                        }
                         ui.separator();
                         if ui.button("Export to PNG...").clicked() {
                             ui.close();
                             if let Some(layout) = &self.layout_result {
-                                let cwd = std::env::current_dir().unwrap_or_default();
-                                let dialog = rfd::FileDialog::new()
-                                    .set_directory(&cwd)
+                                let dialog = session.dialog()
                                     .add_filter("PNG", &["png"])
                                     .set_file_name("diagram.png");
                                 if let Some(path) = dialog.save_file() {
@@ -634,13 +638,14 @@ enum AppMode {
 
 struct BoxcrabApp {
     mode: AppMode,
+    session: session::Session,
 }
 
 impl eframe::App for BoxcrabApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         match &mut self.mode {
             AppMode::Viewer(v) => {
-                match v.render(ui) {
+                match v.render(ui, &mut self.session) {
                     ViewerAction::None => {}
                     ViewerAction::NewDiagram => {
                         self.mode = AppMode::Editor(editor::EditorState::new());
@@ -654,7 +659,7 @@ impl eframe::App for BoxcrabApp {
                 }
             }
             AppMode::Editor(e) => {
-                match editor::render_editor_ui(e, ui) {
+                match editor::render_editor_ui(e, ui, &mut self.session) {
                     editor::EditorAction::OpenFile(path, fmt) => {
                         self.mode = AppMode::Viewer(ViewerState::new(
                             path,
@@ -744,6 +749,8 @@ fn main() {
         ("boxcrab — New Diagram".to_string(), 0, None)
     };
 
+    let cli_file = cli.file.as_ref().map(|f| std::fs::canonicalize(f).unwrap_or_else(|_| f.clone()));
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(title)
@@ -763,7 +770,11 @@ fn main() {
             } else {
                 AppMode::Editor(editor::EditorState::new())
             };
-            Ok(Box::new(BoxcrabApp { mode }))
+            let mut session = session::Session::default();
+            if let Some(f) = &cli_file {
+                session.note(f);
+            }
+            Ok(Box::new(BoxcrabApp { mode, session }))
         }),
     )
     .expect("Failed to start eframe");
