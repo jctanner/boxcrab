@@ -92,7 +92,7 @@ fn serialize_sequence(g: &DiagramGraph) -> String {
         if def.label == name {
             out.push_str(&format!("    {kw} {name}\n"));
         } else {
-            out.push_str(&format!("    {kw} {name} as {}\n", def.label));
+            out.push_str(&format!("    {kw} {name} as {}\n", crate::seq_model::to_br(&def.label)));
         }
     }
 
@@ -183,12 +183,17 @@ fn serialize_sequence(g: &DiagramGraph) -> String {
                 indent(depth),
                 pos,
                 names.join(","),
-                def.label
+                crate::seq_model::to_br(&def.label)
             ));
         } else {
             let line = format!("{}{}{}", name_of(&e.from), arrow_token(e), name_of(&e.to));
             match &e.label {
-                Some(l) => out.push_str(&format!("{}{}: {}\n", indent(depth), line, l)),
+                Some(l) => out.push_str(&format!(
+                    "{}{}: {}\n",
+                    indent(depth),
+                    line,
+                    crate::seq_model::to_br(l)
+                )),
                 None => out.push_str(&format!("{}{}\n", indent(depth), line)),
             }
         }
@@ -429,5 +434,24 @@ mod tests {
         assert!(text.contains("Note left of P2: Note"), "{text}");
         let g2 = crate::parser::parse(&text, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
         assert_eq!(seq_summary(&g), seq_summary(&g2));
+    }
+
+    #[test]
+    fn sequence_line_breaks_round_trip() {
+        let src = "sequenceDiagram
+    participant CI as GitLab CI runner<br/>strat-pipeline
+    participant B
+    CI->>B: first line<br />second line
+    Note over CI,B: note<br>text
+";
+        let g1 = crate::parser::parse(src, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
+        assert!(g1.nodes.values().any(|n| n.label == "GitLab CI runner\nstrat-pipeline"));
+        assert_eq!(g1.edges[0].label.as_deref(), Some("first line\nsecond line"));
+        let text = serialize(&g1);
+        assert!(text.contains("participant CI as GitLab CI runner<br/>strat-pipeline"), "{text}");
+        assert!(text.contains("CI->>B: first line<br/>second line"), "{text}");
+        assert!(text.contains("Note over CI,B: note<br/>text"), "{text}");
+        let g2 = crate::parser::parse(&text, crate::parser::DiagramFormat::Mermaid, 0, None).unwrap();
+        assert_eq!(seq_summary(&g1), seq_summary(&g2));
     }
 }

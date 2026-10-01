@@ -27,6 +27,43 @@ pub const ARROW_STYLES: &[(&str, EdgeType, Option<ArrowheadType>)] = &[
     ("Dashed async --)", EdgeType::DottedArrow, Some(ArrowheadType::Arrow)),
 ];
 
+/// Replace Mermaid line-break tags (`<br/>`, `<br>`, `<br />`, any case)
+/// with newlines.
+pub fn normalize_br(s: &str) -> String {
+    let lower = s.to_ascii_lowercase();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        if lower[i..].starts_with("<br") {
+            // Accept "<br>", "<br/>", "<br />".
+            let rest = &lower[i + 3..];
+            let trimmed = rest.trim_start_matches(' ');
+            let skipped = rest.len() - trimmed.len();
+            let tag_len = if trimmed.starts_with("/>") {
+                Some(skipped + 2)
+            } else if trimmed.starts_with('>') {
+                Some(skipped + 1)
+            } else {
+                None
+            };
+            if let Some(len) = tag_len {
+                out.push('\n');
+                i += 3 + len;
+                continue;
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Inverse of `normalize_br` for writing Mermaid source.
+pub fn to_br(s: &str) -> String {
+    s.replace('\n', "<br/>")
+}
+
 pub fn is_note(id: &str) -> bool {
     id.starts_with(NOTE_PREFIX)
 }
@@ -379,6 +416,14 @@ pub fn slot_of_note(g: &DiagramGraph, note_id: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn br_tags_round_trip() {
+        assert_eq!(normalize_br("a<br/>b<BR>c<br />d<br  />e"), "a\nb\nc\nd\ne");
+        assert_eq!(normalize_br("x <bridge> y"), "x <bridge> y");
+        assert_eq!(normalize_br("héllo<br/>wörld"), "héllo\nwörld");
+        assert_eq!(to_br("a\nb"), "a<br/>b");
+    }
 
     fn two_participants() -> (DiagramGraph, String, String) {
         let mut g = new_sequence_graph();

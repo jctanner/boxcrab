@@ -32,11 +32,6 @@ pub enum SeqDrag {
     Endpoint { slot: usize, is_from: bool },
 }
 
-/// Slots moved by a vertical drag of `dy` scene units.
-fn slot_delta(dy: f32) -> isize {
-    (dy / (seq_layout::slot_y(1) - seq_layout::slot_y(0))).round() as isize
-}
-
 /// Move the timeline entry at `from` to `to` by successive adjacent swaps.
 fn move_slot(state: &mut EditorState, from: usize, to: usize) {
     let mut cur = from;
@@ -54,12 +49,14 @@ struct Geo {
     n: usize,
     life_top: f32,
     life_bottom: f32,
+    metrics: seq_layout::SeqMetrics,
 }
 
 impl Geo {
     fn from_state(state: &EditorState) -> Geo {
         let n = state.graph.edges.len();
-        let (life_top, life_bottom) = seq_layout::lifeline_range(n);
+        let metrics = seq_layout::SeqMetrics::new(&state.graph, state.node_sizes.as_ref());
+        let (life_top, life_bottom) = metrics.lifeline_range();
         let mut parts = Vec::new();
         if let Some(layout) = &state.layout_result {
             for node in &layout.nodes {
@@ -75,7 +72,7 @@ impl Geo {
             }
         }
         parts.sort_by(|a, b| a.1.total_cmp(&b.1));
-        Geo { parts, n, life_top, life_bottom }
+        Geo { parts, n, life_top, life_bottom, metrics }
     }
 
     fn x_of(&self, id: &str) -> Option<f32> {
@@ -358,13 +355,13 @@ fn handle_press(state: &mut EditorState, pos: egui::Pos2) {
         }
         SeqTool::Message => {
             if let Some(from) = geo.lifeline_at(pos).map(str::to_string) {
-                let slot = seq_layout::slot_at_y(pos.y, geo.n);
+                let slot = geo.metrics.slot_at_y(pos.y, geo.n);
                 state.seq_drag = Some(SeqDrag::Message { from, slot });
             }
         }
         SeqTool::SelfMessage => {
             if let Some(id) = geo.lifeline_at(pos).map(str::to_string) {
-                let slot = seq_layout::slot_at_y(pos.y, geo.n);
+                let slot = geo.metrics.slot_at_y(pos.y, geo.n);
                 state.push_undo();
                 sm::add_message(&mut state.graph, slot, &id, &id, state.seq_arrow);
                 state.selected_nodes.clear();
@@ -374,7 +371,7 @@ fn handle_press(state: &mut EditorState, pos: egui::Pos2) {
         }
         SeqTool::Note => {
             if let Some(id) = geo.lifeline_at(pos).map(str::to_string) {
-                let slot = seq_layout::slot_at_y(pos.y, geo.n);
+                let slot = geo.metrics.slot_at_y(pos.y, geo.n);
                 state.push_undo();
                 let note = sm::add_note(&mut state.graph, slot, &id, "right");
                 state.selected_nodes.clear();
@@ -404,7 +401,9 @@ fn handle_release(state: &mut EditorState, pos: Option<egui::Pos2>) {
         }
         SeqDrag::MoveMessage { slot, press } => {
             let n = state.graph.edges.len();
-            let target = (slot as isize + slot_delta(pos.y - press.y)).clamp(0, n as isize - 1) as usize;
+            let target = geo
+                .metrics
+                .slot_at_y(geo.metrics.y(slot) + (pos.y - press.y), n.saturating_sub(1));
             if target != slot {
                 state.push_undo();
                 move_slot(state, slot, target);
@@ -415,7 +414,9 @@ fn handle_release(state: &mut EditorState, pos: Option<egui::Pos2>) {
         SeqDrag::MoveNote { id, press } => {
             let Some(slot) = sm::slot_of_note(&state.graph, &id) else { return };
             let n = state.graph.edges.len();
-            let target = (slot as isize + slot_delta(pos.y - press.y)).clamp(0, n as isize - 1) as usize;
+            let target = geo
+                .metrics
+                .slot_at_y(geo.metrics.y(slot) + (pos.y - press.y), n.saturating_sub(1));
             let new_owner = if (pos.x - press.x).abs() > 30.0 {
                 geo.nearest_to_x(pos.x, 110.0)
                     .map(str::to_string)
@@ -574,7 +575,7 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                 match (&drag, tool) {
                     (Some(SeqDrag::Message { from, slot }), _) => {
                         if let Some(fx) = geo.x_of(from) {
-                            let y = seq_layout::slot_y(*slot);
+                            let y = geo.metrics.y(*slot);
                             let target = geo.nearest_to_x(mp.x, 110.0).filter(|t| *t != from);
                             let end_x = target.and_then(|t| geo.x_of(t)).unwrap_or(mp.x);
                             scene_ui.painter().line_segment(
@@ -589,10 +590,11 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                         }
                     }
                     (Some(SeqDrag::MoveMessage { slot, press }), _) => {
-                        let n = geo.n as isize;
-                        let target =
-                            (*slot as isize + slot_delta(mp.y - press.y)).clamp(0, n - 1) as usize;
-                        let y = seq_layout::slot_y(target);
+                        let target = geo.metrics.slot_at_y(
+                            geo.metrics.y(*slot) + (mp.y - press.y),
+                            geo.n.saturating_sub(1),
+                        );
+                        let y = geo.metrics.y(target);
                         if let (Some(first), Some(last)) = (geo.parts.first(), geo.parts.last()) {
                             scene_ui.painter().line_segment(
                                 [
@@ -608,10 +610,11 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                     }
                     (Some(SeqDrag::MoveNote { id, press }), _) => {
                         let cur = sm::slot_of_note(&state_graph, id).unwrap_or(0);
-                        let n = geo.n as isize;
-                        let target =
-                            (cur as isize + slot_delta(mp.y - press.y)).clamp(0, n - 1) as usize;
-                        let y = seq_layout::slot_y(target);
+                        let target = geo.metrics.slot_at_y(
+                            geo.metrics.y(cur) + (mp.y - press.y),
+                            geo.n.saturating_sub(1),
+                        );
+                        let y = geo.metrics.y(target);
                         if let Some(first) = geo.parts.first() {
                             scene_ui.painter().line_segment(
                                 [
@@ -690,7 +693,7 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                     (None, SeqTool::Message | SeqTool::SelfMessage | SeqTool::Note) => {
                         if let Some(id) = geo.lifeline_at(mp) {
                             if let Some(x) = geo.x_of(id) {
-                                let y = seq_layout::slot_y(seq_layout::slot_at_y(mp.y, geo.n));
+                                let y = geo.metrics.y(geo.metrics.slot_at_y(mp.y, geo.n));
                                 scene_ui
                                     .painter()
                                     .circle_filled(egui::Pos2::new(x, y), 5.0_f32, blue);
@@ -708,7 +711,7 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
                         };
                         scene_ui.painter().line_segment(
                             [
-                                egui::Pos2::new(x, seq_layout::lifeline_range(0).0 - 40.0),
+                                egui::Pos2::new(x, geo.life_top - 40.0),
                                 egui::Pos2::new(x, geo.life_bottom + 40.0),
                             ],
                             egui::Stroke::new(
@@ -842,7 +845,7 @@ fn participant_panel(state: &mut EditorState, ui: &mut egui::Ui, id: &str) {
     let Some(def) = state.graph.nodes.get(id) else { return };
     heading(ui, "Participant");
 
-    let mut label = def.label.clone();
+    let mut label = sm::to_br(&def.label);
     let mut shape = def.shape;
     let mut focus = false;
     field_label(ui, "Label:");
@@ -884,7 +887,7 @@ fn participant_panel(state: &mut EditorState, ui: &mut egui::Ui, id: &str) {
     if label_changed || kind_changed {
         if let Some(def) = state.graph.nodes.get_mut(id) {
             if label_changed {
-                def.label = label;
+                def.label = sm::normalize_br(&label);
             }
             def.shape = shape;
         }
@@ -907,7 +910,7 @@ fn note_panel(state: &mut EditorState, ui: &mut egui::Ui, id: &str) {
     let Some(def) = state.graph.nodes.get(id) else { return };
     heading(ui, "Note");
 
-    let mut text = def.label.clone();
+    let mut text = sm::to_br(&def.label);
     let mut info = sm::note_info(def);
     let mut focus = false;
     field_label(ui, "Text:");
@@ -986,7 +989,7 @@ fn note_panel(state: &mut EditorState, ui: &mut egui::Ui, id: &str) {
     if text_changed || info_changed {
         if let Some(def) = state.graph.nodes.get_mut(id) {
             if text_changed {
-                def.label = text;
+                def.label = sm::normalize_br(&text);
             }
             if info_changed {
                 sm::set_note_info(def, &info);
@@ -1016,7 +1019,7 @@ fn message_panel(state: &mut EditorState, ui: &mut egui::Ui, idx: usize) {
     heading(ui, "Message");
 
     let n = state.graph.edges.len();
-    let mut label = edge.label.clone().unwrap_or_default();
+    let mut label = sm::to_br(edge.label.as_deref().unwrap_or(""));
     let mut focus = false;
     field_label(ui, "Label:");
     let label_changed = text_field(ui, &mut label, &mut focus);
@@ -1098,7 +1101,11 @@ fn message_panel(state: &mut EditorState, ui: &mut egui::Ui, idx: usize) {
     }
     let mut changed = false;
     if label_changed {
-        state.graph.edges[idx].label = if label.is_empty() { None } else { Some(label) };
+        state.graph.edges[idx].label = if label.is_empty() {
+            None
+        } else {
+            Some(sm::normalize_br(&label))
+        };
         changed = true;
     }
     if let Some(i) = new_style {
@@ -1146,6 +1153,11 @@ fn message_panel(state: &mut EditorState, ui: &mut egui::Ui, idx: usize) {
 mod tests {
     use super::*;
 
+    /// y of a slot in a diagram whose labels are all single-line.
+    fn sy(slot: usize) -> f32 {
+        110.0 + 40.0 * slot as f32
+    }
+
     fn run_frame(ctx: &egui::Context, state: &mut EditorState, events: Vec<egui::Event>) {
         let mut input = egui::RawInput::default();
         input.screen_rect = Some(egui::Rect::from_min_size(
@@ -1188,25 +1200,25 @@ mod tests {
         let geo = Geo::from_state(&state);
         let p1 = geo.x_of(&sm::participant_ids(&state.graph)[0]).unwrap();
         let p3 = geo.x_of(&sm::participant_ids(&state.graph)[3]).unwrap();
-        handle_press(&mut state, egui::Pos2::new(p1, seq_layout::slot_y(0)));
+        handle_press(&mut state, egui::Pos2::new(p1, sy(0)));
         assert!(state.seq_drag.is_some());
-        handle_release(&mut state, Some(egui::Pos2::new(p3 + 5.0, seq_layout::slot_y(0))));
+        handle_release(&mut state, Some(egui::Pos2::new(p3 + 5.0, sy(0))));
         assert_eq!(state.graph.edges.len(), 1);
         assert_eq!(sm::name_of(&state.graph.edges[0].from), "P1");
         assert_eq!(sm::name_of(&state.graph.edges[0].to), "P3");
 
         // Self message and a note lower down.
         state.seq_tool = SeqTool::SelfMessage;
-        handle_press(&mut state, egui::Pos2::new(p1, seq_layout::slot_y(1)));
+        handle_press(&mut state, egui::Pos2::new(p1, sy(1)));
         state.seq_tool = SeqTool::Note;
-        handle_press(&mut state, egui::Pos2::new(p3, seq_layout::slot_y(2)));
+        handle_press(&mut state, egui::Pos2::new(p3, sy(2)));
         assert_eq!(state.graph.edges.len(), 3);
         assert!(state.selected_nodes.iter().any(|n| sm::is_note(n)));
 
         // Select the first message by clicking its line.
         state.seq_tool = SeqTool::Select;
         let mid_x = (p1 + p3) / 2.0;
-        handle_press(&mut state, egui::Pos2::new(mid_x, seq_layout::slot_y(0)));
+        handle_press(&mut state, egui::Pos2::new(mid_x, sy(0)));
         assert_eq!(state.selected_edge, Some(0));
 
         // Reorder: drag P1's box past everything else.
@@ -1325,8 +1337,8 @@ mod tests {
         let xs: Vec<f32> = geo.parts.iter().map(|p| p.1).collect();
         state.seq_tool = SeqTool::Message;
         for (slot, (a, b)) in [(0, (0, 1)), (1, (1, 2)), (2, (0, 2))] {
-            handle_press(&mut state, egui::Pos2::new(xs[a], seq_layout::slot_y(slot)));
-            handle_release(&mut state, Some(egui::Pos2::new(xs[b], seq_layout::slot_y(slot))));
+            handle_press(&mut state, egui::Pos2::new(xs[a], sy(slot)));
+            handle_release(&mut state, Some(egui::Pos2::new(xs[b], sy(slot))));
         }
         state.seq_tool = SeqTool::Select;
         for (i, l) in ["first", "second", "third"].iter().enumerate() {
@@ -1344,7 +1356,7 @@ mod tests {
     fn drag_message_down_reorders_timeline() {
         let (mut state, x0, x1) = two_msg_state();
         let mid = (x0 + x1) / 2.0;
-        let y0 = seq_layout::slot_y(0);
+        let y0 = sy(0);
         handle_press(&mut state, egui::Pos2::new(mid, y0));
         assert!(matches!(state.seq_drag, Some(SeqDrag::MoveMessage { slot: 0, .. })));
         handle_release(&mut state, Some(egui::Pos2::new(mid, y0 + 82.0)));
@@ -1352,7 +1364,7 @@ mod tests {
         assert_eq!(state.selected_edge, Some(2));
 
         // A click without moving changes nothing.
-        let y2 = seq_layout::slot_y(2);
+        let y2 = sy(2);
         handle_press(&mut state, egui::Pos2::new(mid, y2));
         handle_release(&mut state, Some(egui::Pos2::new(mid, y2 + 3.0)));
         assert_eq!(labels(&state), vec!["second", "third", "first"]);
@@ -1363,8 +1375,8 @@ mod tests {
         let (mut state, x0, x1) = two_msg_state();
         let x2 = Geo::from_state(&state).parts[2].1;
         // Select message 0 (P1 -> P2), then drag its head to P3.
-        handle_press(&mut state, egui::Pos2::new((x0 + x1) / 2.0, seq_layout::slot_y(0)));
-        handle_release(&mut state, Some(egui::Pos2::new((x0 + x1) / 2.0, seq_layout::slot_y(0))));
+        handle_press(&mut state, egui::Pos2::new((x0 + x1) / 2.0, sy(0)));
+        handle_release(&mut state, Some(egui::Pos2::new((x0 + x1) / 2.0, sy(0))));
         assert_eq!(state.selected_edge, Some(0));
         let (_, head) = endpoints(&state, 0).unwrap();
         handle_press(&mut state, head);
@@ -1380,7 +1392,7 @@ mod tests {
         state.seq_tool = SeqTool::Note;
         let geo = Geo::from_state(&state);
         let (p1, p3) = (geo.parts[0].1, geo.parts[2].1);
-        handle_press(&mut state, egui::Pos2::new(p1, seq_layout::slot_y(3)));
+        handle_press(&mut state, egui::Pos2::new(p1, sy(3)));
         let note = state.selected_nodes.iter().next().cloned().unwrap();
         state.seq_tool = SeqTool::Select;
         assert_eq!(sm::slot_of_note(&state.graph, &note), Some(3));

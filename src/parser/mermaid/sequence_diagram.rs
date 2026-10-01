@@ -260,7 +260,7 @@ struct GroupFrame {
 fn parse_participant_decl(s: &str) -> (String, String) {
     if let Some(idx) = s.find(" as ") {
         let id = s[..idx].trim().to_string();
-        let label = s[idx + 4..].trim().to_string();
+        let label = crate::seq_model::normalize_br(s[idx + 4..].trim());
         (id, label)
     } else {
         (s.to_string(), s.to_string())
@@ -327,7 +327,7 @@ fn parse_note(rest: &str) -> (String, Vec<String>, String) {
 fn split_note_content(s: &str) -> (Vec<String>, String) {
     if let Some(idx) = s.find(':') {
         let parts_str = s[..idx].trim();
-        let text = s[idx + 1..].trim().to_string();
+        let text = crate::seq_model::normalize_br(s[idx + 1..].trim());
         let participants: Vec<String> = parts_str
             .split(',')
             .map(|p| p.trim().to_string())
@@ -371,7 +371,7 @@ fn try_parse_message(
             let after = &line[idx + arrow_str.len()..];
             let (mut to, label) = if let Some(colon_idx) = after.find(':') {
                 let t = after[..colon_idx].trim().to_string();
-                let l = after[colon_idx + 1..].trim().to_string();
+                let l = crate::seq_model::normalize_br(after[colon_idx + 1..].trim());
                 (t, if l.is_empty() { None } else { Some(l) })
             } else {
                 (after.trim().to_string(), None)
