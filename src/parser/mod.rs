@@ -4,7 +4,7 @@ pub mod structurizr;
 
 use crate::diagram::DiagramGraph;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DiagramFormat {
     Mermaid,
     Structurizr,

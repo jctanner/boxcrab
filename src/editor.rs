@@ -46,6 +46,7 @@ pub struct EditorState {
     pub selected_edge: Option<usize>,
     pub file_path: Option<PathBuf>,
     pub dirty: bool,
+    pub confirm_view_switch: bool,
     pub scene_rect: egui::Rect,
     pub full_scene_rect: egui::Rect,
     undo_stack: Vec<UndoSnapshot>,
@@ -81,6 +82,7 @@ impl EditorState {
             selected_edge: None,
             file_path: None,
             dirty: false,
+            confirm_view_switch: false,
             scene_rect: scene,
             full_scene_rect: scene,
             undo_stack: Vec::new(),
@@ -537,6 +539,24 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                         ui.close();
                         *state = EditorState::new();
                     }
+                    let view_target = state.file_path.as_deref().and_then(|p| {
+                        parser::detect_format(p).map(|f| (p.to_path_buf(), f))
+                    });
+                    if ui
+                        .add_enabled(view_target.is_some(), egui::Button::new("Switch to View Mode"))
+                        .on_disabled_hover_text("Save the diagram first")
+                        .clicked()
+                    {
+                        ui.close();
+                        if let Some((path, fmt)) = view_target {
+                            if state.dirty {
+                                state.confirm_view_switch = true;
+                            } else {
+                                action = EditorAction::OpenFile(path, fmt);
+                            }
+                        }
+                    }
+                    ui.separator();
                     if ui.button("Open in Viewer...").clicked() {
                         ui.close();
                         let cwd = std::env::current_dir().unwrap_or_default();
@@ -658,6 +678,47 @@ fn render_editor_menu(state: &mut EditorState, ui: &mut egui::Ui) -> EditorActio
                 });
             });
         });
+
+    if state.confirm_view_switch {
+        let target = state.file_path.as_deref().and_then(|p| {
+            parser::detect_format(p).map(|f| (p.to_path_buf(), f))
+        });
+        let mut close = false;
+        egui::Window::new("Unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ui.ctx(), |ui| {
+                ui.label("Save changes before switching to view mode?");
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        if let Some((path, fmt)) = &target {
+                            let text = serialize_for_path(path, &state.graph);
+                            match std::fs::write(path, &text) {
+                                Ok(()) => {
+                                    state.dirty = false;
+                                    action = EditorAction::OpenFile(path.clone(), *fmt);
+                                    close = true;
+                                }
+                                Err(e) => eprintln!("Save error: {e}"),
+                            }
+                        }
+                    }
+                    if ui.button("Discard").clicked() {
+                        if let Some((path, fmt)) = &target {
+                            action = EditorAction::OpenFile(path.clone(), *fmt);
+                        }
+                        close = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if close {
+            state.confirm_view_switch = false;
+        }
+    }
 
     action
 }

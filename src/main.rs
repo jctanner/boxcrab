@@ -32,6 +32,12 @@ struct Cli {
     view: usize,
 }
 
+enum ViewerAction {
+    None,
+    NewDiagram,
+    EditCurrent(PathBuf, parser::DiagramFormat),
+}
+
 struct ViewerState {
     file_path: PathBuf,
     format: parser::DiagramFormat,
@@ -275,8 +281,8 @@ impl ViewerState {
         self.do_layout();
     }
 
-    fn render(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut switch_to_editor = false;
+    fn render(&mut self, ui: &mut egui::Ui) -> ViewerAction {
+        let mut action = ViewerAction::None;
 
         self.check_file_updates();
 
@@ -322,10 +328,24 @@ impl ViewerState {
                     ui.menu_button("File", |ui| {
                         ui.menu_button("New", |ui| {
                             if ui.button("Mermaid Flowchart").clicked() {
-                                switch_to_editor = true;
+                                action = ViewerAction::NewDiagram;
                                 ui.close();
                             }
                         });
+                        let editable = self.format != parser::DiagramFormat::Structurizr;
+                        if ui
+                            .add_enabled(editable, egui::Button::new("Switch to Edit Mode"))
+                            .on_disabled_hover_text(
+                                "Editing is not supported for Structurizr DSL files",
+                            )
+                            .clicked()
+                        {
+                            ui.close();
+                            action = ViewerAction::EditCurrent(
+                                self.file_path.clone(),
+                                self.format,
+                            );
+                        }
                         ui.separator();
                         if ui.button("Open...").clicked() {
                             ui.close();
@@ -603,7 +623,7 @@ impl ViewerState {
                     });
             });
 
-        switch_to_editor
+        action
     }
 }
 
@@ -620,8 +640,17 @@ impl eframe::App for BoxcrabApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         match &mut self.mode {
             AppMode::Viewer(v) => {
-                if v.render(ui) {
-                    self.mode = AppMode::Editor(editor::EditorState::new());
+                match v.render(ui) {
+                    ViewerAction::None => {}
+                    ViewerAction::NewDiagram => {
+                        self.mode = AppMode::Editor(editor::EditorState::new());
+                    }
+                    ViewerAction::EditCurrent(path, fmt) => {
+                        match editor::EditorState::from_file(path, fmt) {
+                            Ok(state) => self.mode = AppMode::Editor(state),
+                            Err(err) => v.parse_error = Some(format!("Failed to open for editing: {err}")),
+                        }
+                    }
                 }
             }
             AppMode::Editor(e) => {
