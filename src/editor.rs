@@ -47,6 +47,7 @@ pub struct EditorState {
     pub file_path: Option<PathBuf>,
     pub dirty: bool,
     pub confirm_view_switch: bool,
+    last_viewport_size: Option<egui::Vec2>,
     pub scene_rect: egui::Rect,
     pub full_scene_rect: egui::Rect,
     undo_stack: Vec<UndoSnapshot>,
@@ -83,6 +84,7 @@ impl EditorState {
             file_path: None,
             dirty: false,
             confirm_view_switch: false,
+            last_viewport_size: None,
             scene_rect: scene,
             full_scene_rect: scene,
             undo_stack: Vec::new(),
@@ -1554,8 +1556,6 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         }
     }
 
-    let scene_rect_before = state.scene_rect;
-
     let selected = state.selected_nodes.clone();
     let selected_edge_idx = state.selected_edge;
     let layout_snap = state.layout_result.clone();
@@ -1573,6 +1573,25 @@ fn render_canvas(state: &mut EditorState, ui: &mut egui::Ui) {
         };
 
     let viewport_rect = ui.available_rect_before_wrap();
+
+    // When the viewport resizes (e.g. the properties panel opens), egui::Scene
+    // would refit the scene rect and change the zoom. Resize the scene rect
+    // proportionally instead so the zoom level and top-left anchor stay put.
+    let vp_size = viewport_rect.size();
+    if let Some(prev) = state.last_viewport_size {
+        if prev.x > 1.0 && prev.y > 1.0 && vp_size.x > 1.0 && vp_size.y > 1.0 && prev != vp_size {
+            let r = state.scene_rect;
+            state.scene_rect = egui::Rect::from_min_size(
+                r.min,
+                egui::Vec2::new(
+                    r.width() * vp_size.x / prev.x,
+                    r.height() * vp_size.y / prev.y,
+                ),
+            );
+        }
+    }
+    state.last_viewport_size = Some(vp_size);
+    let scene_rect_before = state.scene_rect;
 
     let mouse_scene_pos = ui
         .input(|i| i.pointer.hover_pos())
